@@ -1,0 +1,3 @@
+LOGIN=sevent
+SESSION_SECRET=change-me
+ENCRYPTION_KEY=change-me-to-a-long-random-secret
