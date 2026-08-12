@@ -33,7 +33,7 @@ npm run deploy          # 构建 + wrangler deploy
 ## 后端规范
 
 - 数据 API 一律挂 `requireAuth` 中间件（`worker/src/auth.ts`），白名单仅 /api/login、/api/logout、/api/me、/api/health。
-- 认证为无状态签名 cookie：`SESSION_SECRET` 做 HMAC-SHA256 签名，密码比对先 SHA-256 定长化再常数时间比较。
+- 认证为无状态签名 cookie：会话签名密钥由 `ENCRYPTION_KEY` 经 HKDF-SHA256 派生（域分离），密码比对先 SHA-256 定长化再常数时间比较。
 - AI API Key 与 WebDAV 密码用 `ENCRYPTION_KEY` 做 AES-GCM 加密后存入 D1，绝不返回明文。
 - 数据库迁移写进 `applySchema`（幂等），新表/新列在此补充，不手工改线上库。
 - 所有 id 参数、multipart 文件名做校验/净化，动态 SQL 字段用白名单。

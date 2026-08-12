@@ -15,7 +15,7 @@
 - 后端：Cloudflare Workers + Hono，全栈单 Worker
 - 数据库：Cloudflare D1 (SQLite)
 - 存储：Cloudflare R2（音频文件）
-- 认证：全站登录（`LOGIN` 存于环境变量，当前值为 `sevent`，`POST /api/login` / `POST /api/logout` / `GET /api/me`），前端 `AuthContext` + `RequireAuth` 路由守卫（未登录重定向 `/login`，登录后跳回来源页，刷新经 `/api/me` 保持登录），无状态签名 cookie 认证——会话 token 由 `SESSION_SECRET` 做 HMAC-SHA256 签名（`payload.signature`，payload 为签发 epoch 毫秒，7 天有效）直接置于 httpOnly cookie，服务器验签自校验，不依赖 DB/KV 会话状态
+- 认证：全站登录（`LOGIN` 存于环境变量，当前值为 `sevent`，`POST /api/login` / `POST /api/logout` / `GET /api/me`），前端 `AuthContext` + `RequireAuth` 路由守卫（未登录重定向 `/login`，登录后跳回来源页，刷新经 `/api/me` 保持登录），无状态签名 cookie 认证——会话 token 由 `ENCRYPTION_KEY` 经 HKDF-SHA256 派生签名密钥（域分离：AES-GCM 加密与 HMAC 签名使用不同派生密钥材料）做 HMAC-SHA256 签名（`payload.signature`，payload 为签发 epoch 毫秒，7 天有效）直接置于 httpOnly cookie，服务器验签自校验，不依赖 DB/KV 会话状态
 - 安全：密码比对先将 LOGIN 与输入各自 SHA-256 散列为定长串再常数时间比较，消除密码长度侧信道；AI API Key 使用 ENCRYPTION_KEY 通过 AES-GCM 加密后存入 D1，不返回明文
 - 数据 API 鉴权：除 /api/login / /api/logout / /api/me / /api/health 公开外，其余 /api/* 均需登录。统一由 `worker/src/auth.ts` 导出的 `requireAuth` 中间件按数据集前缀挂载（如 `/api/articles`、`/api/articles/*`），后续 /api/books、/api/units、/api/words 一律照此复制挂载。未认证返回 401 `{error:"unauthorized"}`
 
@@ -53,7 +53,7 @@ npx wrangler d1 execute <database_name> --file=./db/schema.sql --remote
 
 其中 `<database_name>` 替换为 `wrangler.toml` 中 d1_databases 的 `database_name`（如 `sevent-english-db`）。
 
-> **本地/部署绑定说明**：`wrangler.toml` 已启用 D1(`DB`) 与 R2(`BUCKET`) 绑定并回填生产资源（D1 `sevent-english-db`、R2 `sevent-english-assets`，均已在云端创建）。本地 dev 时 wrangler 会在 `.wrangler/state` 维护本地 sqlite / Miniflare 对象存储，无需真实云端资源即可本地跑通数据流。生产环境变量/密钥（`LOGIN` / `SESSION_SECRET` / `ENCRYPTION_KEY`）不写入配置文件，通过 `npx wrangler secret put <KEY> --name sevent-english` 单独配置。
+> **本地/部署绑定说明**：`wrangler.toml` 已启用 D1(`DB`) 与 R2(`BUCKET`) 绑定并回填生产资源（D1 `sevent-english-db`、R2 `sevent-english-assets`，均已在云端创建）。本地 dev 时 wrangler 会在 `.wrangler/state` 维护本地 sqlite / Miniflare 对象存储，无需真实云端资源即可本地跑通数据流。生产环境变量/密钥（`LOGIN` / `ENCRYPTION_KEY`）不写入配置文件，通过 `npx wrangler secret put <KEY> --name sevent-english` 单独配置。
 
 **兜底机制**：`GET /api/health`（公开探活端点）会在每次被调用时执行幂等的 `applySchema`（`CREATE TABLE IF NOT EXISTS`），可作为建表兜底。部署后调用一次 `health` 即自动建表；显式 `d1 execute` 与 health 兜底二者不冲突，可都保留。
 
@@ -69,7 +69,7 @@ npx wrangler d1 execute <database_name> --file=./db/schema.sql
 
 ### AI 配置
 
-复制 `.dev.vars.example` 为本地 `.dev.vars`，设置 `LOGIN`、`SESSION_SECRET` 和 `ENCRYPTION_KEY`。AI 的 Base URL、API Key 和模型名在管理后台的「AI模型」页面配置；API Key 会使用 `ENCRYPTION_KEY` 加密后存入 D1。已有 D1 数据库会在首次访问数据 API 时自动补齐文章分析字段和新表；AI 分析在后台执行，阅读页会自动轮询状态。也可以手动访问 `/api/health` 执行迁移。
+复制 `.dev.vars.example` 为本地 `.dev.vars`，设置 `LOGIN` 和 `ENCRYPTION_KEY`。AI 的 Base URL、API Key 和模型名在管理后台的「AI模型」页面配置；API Key 会使用 `ENCRYPTION_KEY` 加密后存入 D1。已有 D1 数据库会在首次访问数据 API 时自动补齐文章分析字段和新表；AI 分析在后台执行，阅读页会自动轮询状态。也可以手动访问 `/api/health` 执行迁移。
 
 ### 前端样式
 
