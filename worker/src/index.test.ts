@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import app from "./index";
 import type { Env } from "./auth";
+import type { AnalyzeJob } from "./db";
 import { signToken } from "./auth";
 
 const SECRET = "test-encryption-key"; // 测试用 ENCRYPTION_KEY（与 mockEnv 一致，签名密钥由它派生）
@@ -42,6 +43,7 @@ function mockEnv(): Env {
     ENCRYPTION_KEY: "test-encryption-key",
     DB: mockD1(),
     BUCKET: {} as R2Bucket,
+    ANALYSIS_QUEUE: { send: async () => {} } as unknown as Queue<AnalyzeJob>,
   };
 }
 

@@ -19,7 +19,9 @@ import {
   getArticleNote,
   upsertArticleNote,
 } from "./db";
+import type { AnalyzeJob, AnalysisStatus } from "./db";
 import { generateArticleAnalysis } from "./articleAnalysis";
+import type { AiModelRuntimeConfig } from "./aiConfig";
 import { readAiModelConfig, readAiModelRuntimeConfig, writeAiModelConfig } from "./aiConfig";
 import { listUpstreamModels, testUpstreamModel } from "./aiProvider";
 import { backupAll, restoreAll } from "./backup";
@@ -104,32 +106,53 @@ app.get("/api/articles/:id", async (c) => {
   return c.json({ ...article, annotations, note: note ?? null });
 });
 
-async function analyzeArticle(c: Context<{ Bindings: Env }>, id: number, title: string, content: string) {
-  const config = await readAiModelRuntimeConfig(c.env.DB, c.env.ENCRYPTION_KEY);
-  if (!config) {
-    await c.env.DB.prepare("UPDATE articles SET analysis_status = ?, analysis_error = ?, updated_at = datetime('now') WHERE id = ?")
-      .bind("unconfigured", "AI model is not configured", id).run();
-    return;
-  }
-  await c.env.DB.prepare("UPDATE articles SET analysis_status = ?, analysis_error = NULL, updated_at = datetime('now') WHERE id = ?")
-    .bind("processing", id).run();
-  try {
-    const analysis = await generateArticleAnalysis(config, title, content);
-    await c.env.DB.prepare("UPDATE articles SET analysis_status = ?, analysis_json = ?, analysis_error = NULL, updated_at = datetime('now') WHERE id = ?")
-      .bind("completed", JSON.stringify(analysis), id).run();
-  } catch {
-    await c.env.DB.prepare("UPDATE articles SET analysis_status = ?, analysis_error = ?, updated_at = datetime('now') WHERE id = ?")
-      .bind("failed", "analysis failed", id).run();
+// ---- AI 文章分析（队列驱动）----
+// 背景：此前用 c.executionCtx.waitUntil() 在响应返回后继续跑 AI 分析，
+// 但 Cloudflare 平台限制 waitUntil 任务在响应/断开后最多只能再运行 30 秒，
+// AI 生成完整分析（长文章）远超 30 秒，任务被平台硬终止且不触发 JS catch，
+// 导致 analysis_status 永久停留在 processing（“一直分析中”）。
+// 现改为：analyze 路由只做「设 processing + 入队」，由队列 consumer 执行 AI 调用
+// （consumer wall time 上限 15 分钟，足以容纳长任务）。
+
+async function setAnalysisStatus(env: Env, id: number, status: AnalysisStatus, error: string | null, analysisJson?: string): Promise<void> {
+  if (analysisJson !== undefined) {
+    await env.DB.prepare("UPDATE articles SET analysis_status = ?, analysis_json = ?, analysis_error = ?, updated_at = datetime('now') WHERE id = ?")
+      .bind(status, analysisJson, error, id).run();
+  } else {
+    await env.DB.prepare("UPDATE articles SET analysis_status = ?, analysis_error = ?, updated_at = datetime('now') WHERE id = ?")
+      .bind(status, error, id).run();
   }
 }
 
-async function scheduleAnalysis(c: Context<{ Bindings: Env }>, id: number, title: string, content: string) {
+// 队列 consumer 核心：读取 AI 配置并执行一次完整分析，结果写回 articles 表。
+// 所有可预期的失败（AI 未配置 / 请求失败 / 超时 / JSON 校验失败）都收敛为明确的
+// analysis_status 与 analysis_error，不重试（重复调用会浪费 AI 额度；用户可通过
+// “重新分析”按钮手动重试）。导出以支持单元测试直接驱动。
+export async function handleAnalyzeJob(env: Env, job: AnalyzeJob): Promise<void> {
+  let config: AiModelRuntimeConfig | null;
   try {
-    c.executionCtx.waitUntil(analyzeArticle(c, id, title, content));
-  } catch {
-    // Hono 单元测试没有 ExecutionContext，使用同步回退以保持行为可验证。
-    await analyzeArticle(c, id, title, content);
+    config = await readAiModelRuntimeConfig(env.DB, env.ENCRYPTION_KEY);
+  } catch (error) {
+    // 配置读取失败（如密钥解密失败）属于永久性错误，重试无意义，直接标记失败。
+    await setAnalysisStatus(env, job.id, "failed", error instanceof Error ? error.message : "AI config is invalid");
+    return;
   }
+  if (!config) {
+    await setAnalysisStatus(env, job.id, "unconfigured", null);
+    return;
+  }
+  await setAnalysisStatus(env, job.id, "processing", null);
+  try {
+    const analysis = await generateArticleAnalysis(config, job.title, job.content);
+    await setAnalysisStatus(env, job.id, "completed", null, JSON.stringify(analysis));
+  } catch (error) {
+    await setAnalysisStatus(env, job.id, "failed", error instanceof Error ? error.message : "analysis failed");
+  }
+}
+
+// analyze 路由统一入口：设 processing 后入队，响应立即返回，前端按 analysis_status 轮询。
+async function enqueueAnalysis(c: Context<{ Bindings: Env }>, id: number, title: string, content: string): Promise<void> {
+  await c.env.ANALYSIS_QUEUE.send({ id, title, content });
 }
 
 // ---- AI 模型管理 ----------------
@@ -285,9 +308,8 @@ app.post("/api/articles", async (c) => {
   });
   // 兼容极简 D1 mock；真实 D1 始终返回刚插入的文章。
   if (!article) return c.json(article, 201);
-  await c.env.DB.prepare("UPDATE articles SET analysis_status = ?, analysis_error = NULL, updated_at = datetime('now') WHERE id = ?")
-    .bind("processing", article.id).run();
-  await scheduleAnalysis(c, article.id, article.title, article.content);
+  await setAnalysisStatus(c.env, article.id, "processing", null);
+  await enqueueAnalysis(c, article.id, article.title, article.content);
   return c.json(await getArticle(c.env.DB, article.id), 201);
 });
 
@@ -296,9 +318,8 @@ app.post("/api/admin/articles/:id/analyze", async (c) => {
   if (isInvalidId(id)) return c.json({ error: "not found" }, 404);
   const article = await getArticle(c.env.DB, Number(id));
   if (!article) return c.json({ error: "not found" }, 404);
-  await c.env.DB.prepare("UPDATE articles SET analysis_status = ?, analysis_error = NULL, updated_at = datetime('now') WHERE id = ?")
-    .bind("processing", article.id).run();
-  await scheduleAnalysis(c, article.id, article.title, article.content);
+  await setAnalysisStatus(c.env, article.id, "processing", null);
+  await enqueueAnalysis(c, article.id, article.title, article.content);
   return c.json(await getArticle(c.env.DB, article.id));
 });
 
@@ -500,5 +521,22 @@ app.get("/api/audio", async (c) => {
   });
 });
 
-export default app;
+export default {
+  fetch: app.fetch,
+  // Hono 便捷方法转发：`app.request(path, init, env)` 在测试中大量使用，
+  // 默认导出从 Hono app 改为 { fetch, queue } 后保留该方法以保持测试零改动。
+  request: app.request.bind(app),
+  // AI 文章分析队列 consumer：Hono 测试环境可直接调用 app.request 验证路由入队行为，
+  // consumer 核心逻辑（handleAnalyzeJob）单独导出以便单元测试驱动。
+  queue: async (batch: MessageBatch<AnalyzeJob>, env: Env) => {
+    for (const message of batch.messages) {
+      try {
+        await handleAnalyzeJob(env, message.body);
+      } catch (error) {
+        // handleAnalyzeJob 内部已覆盖所有可预期失败；此处兜底防 DB 层意外错误击穿循环。
+        console.error("analysis job failed", error);
+      }
+    }
+  },
+};
 export type App = typeof app;

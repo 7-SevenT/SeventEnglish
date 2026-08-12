@@ -328,4 +328,20 @@ describe("generateArticleAnalysis", () => {
       generateArticleAnalysis(makeConfig(), "Title", validParagraphsContent)
     ).rejects.toThrow();
   });
+
+  it("aborts the request and throws a timeout error when the provider never responds", async () => {
+    // fetch 永不 resolve：模拟 AI 提供商无响应。超时由 AbortSignal 触发。
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal as AbortSignal | undefined;
+          if (!signal) throw new Error("expected an abort signal");
+          signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+        })
+    );
+
+    await expect(
+      generateArticleAnalysis(makeConfig(), "Title", validParagraphsContent, 50)
+    ).rejects.toThrow(/timed out after 50ms/);
+  });
 });

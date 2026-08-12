@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import app from "./index";
+import app, { handleAnalyzeJob } from "./index";
 import { signToken } from "./auth";
 import type { Env } from "./auth";
+import type { AnalyzeJob } from "./db";
 import { writeAiModelConfig } from "./aiConfig";
 
 const secret = "test-encryption-key"; // 测试用 ENCRYPTION_KEY（签名密钥由它派生）
@@ -18,7 +19,11 @@ function env() {
           const id = next++; rows.set(id, { id, title: params[0], content: params[1], publish_date: params[2], analysis_status: "pending", analysis_json: null, analysis_error: null });
         }
         if (/UPDATE articles/.test(sql)) {
-          const row = rows.get(params.at(-1)); if (row) { if (["processing", "completed", "failed", "unconfigured"].includes(params[0])) row.analysis_status = params[0]; if (params[1] && params[0] === "completed") row.analysis_json = params[1]; if (["analysis failed", "AI model is not configured"].includes(params[1])) row.analysis_error = params[1]; }
+          const row = rows.get(params.at(-1)); if (row) {
+            row.analysis_status = params[0];
+            if (params[0] === "completed") row.analysis_json = params[1];
+            if (params[0] === "failed") row.analysis_error = params[1];
+          }
         }
         if (/INSERT INTO settings/.test(sql)) settings.set(String(params[0]), String(params[1]));
         return {};
@@ -33,7 +38,7 @@ function env() {
       return { run, first, all, bind: (...p: any[]) => { params = p; return { run, first, all }; } };
     },
   } as unknown as D1Database;
-  return { LOGIN: "pw", ENCRYPTION_KEY: "test-encryption-key", DB: db, BUCKET: {} as R2Bucket } as Env;
+  return { LOGIN: "pw", ENCRYPTION_KEY: "test-encryption-key", DB: db, BUCKET: {} as R2Bucket, ANALYSIS_QUEUE: { send: async () => {} } as unknown as Queue<AnalyzeJob> } as Env;
 }
 
 async function configuredEnv() {
@@ -48,19 +53,11 @@ async function configuredEnv() {
 
 async function request(path: string, init: RequestInit, e: Env) {
   const token = await signToken(secret, String(Date.now()));
-  const pending: Promise<unknown>[] = [];
-  const executionCtx = {
-    waitUntil(promise: Promise<unknown>) { pending.push(promise); },
-    passThroughOnException() {},
-  } as unknown as ExecutionContext;
-  const response = await app.request(
+  return app.request(
     path,
     { ...init, headers: { cookie: `session=${token}`, ...init.headers } },
     e,
-    executionCtx,
   );
-  await Promise.all(pending);
-  return response;
 }
 
 
@@ -91,25 +88,55 @@ describe("article analysis API", () => {
     expect(response.status).toBe(404);
   });
 
-  it("keeps the article when analysis fails", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("upstream secret")));
-    const e = await configuredEnv();
+  it("POST /api/admin/articles/:id/analyze enqueues a job and marks processing", async () => {
+    const sends: AnalyzeJob[] = [];
+    const e = {
+      ...(await configuredEnv()),
+      ANALYSIS_QUEUE: { send: async (job: AnalyzeJob) => { sends.push(job); } } as unknown as Queue<AnalyzeJob>,
+    };
+    const response = await request("/api/admin/articles/1/analyze", { method: "POST" }, e);
+    expect(response.status).toBe(200);
+    const body = await response.json<any>();
+    expect(body.analysis_status).toBe("processing");
+    expect(sends).toHaveLength(1);
+    expect(sends[0]).toEqual({ id: 1, title: "Seed", content: "C" });
+  });
+
+  it("POST /api/admin/articles/:id/analyze rejects a missing article → 404", async () => {
+    const response = await request("/api/admin/articles/999/analyze", { method: "POST" }, env());
+    expect(response.status).toBe(404);
+  });
+
+  it("POST /api/articles enqueues an analysis job and marks processing", async () => {
+    const sends: AnalyzeJob[] = [];
+    const e = {
+      ...(await configuredEnv()),
+      ANALYSIS_QUEUE: { send: async (job: AnalyzeJob) => { sends.push(job); } } as unknown as Queue<AnalyzeJob>,
+    };
     const response = await request("/api/articles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "T", content: "C", publish_date: "2026-01-01" }) }, e);
     expect(response.status).toBe(201);
-    const followup = await request("/api/articles/2", {}, e);
+    const body = await response.json<any>();
+    expect(body.analysis_status).toBe("processing");
+    expect(sends).toHaveLength(1);
+    expect(sends[0]).toEqual({ id: 2, title: "T", content: "C" });
+  });
+
+  it("consumer marks the article failed with the concrete error when AI request fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("upstream secret")));
+    const e = await configuredEnv();
+    await handleAnalyzeJob(e, { id: 1, title: "Seed", content: "C" });
+    const followup = await request("/api/articles/1", {}, e);
     const body = await followup.json<any>();
     expect(body.analysis_status).toBe("failed");
-    expect(body.analysis_error).toBe("analysis failed");
+    expect(body.analysis_error).toBe("upstream secret");
     vi.unstubAllGlobals();
   });
 
-  it("keeps the article and marks it unconfigured when AI is not configured", async () => {
+  it("consumer marks the article unconfigured when AI is not configured", async () => {
     const e = env();
-    const response = await request("/api/articles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "T", content: "C", publish_date: "2026-01-01" }) }, e);
-    expect(response.status).toBe(201);
-    const followup = await request("/api/articles/2", {}, e);
+    await handleAnalyzeJob(e, { id: 1, title: "Seed", content: "C" });
+    const followup = await request("/api/articles/1", {}, e);
     const body = await followup.json<any>();
     expect(body.analysis_status).toBe("unconfigured");
-    expect(body.analysis_error).toBe("AI model is not configured");
   });
 });

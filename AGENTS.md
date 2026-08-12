@@ -1,6 +1,6 @@
 # SeventEnglish Agent 指南
 
-个人英语阅读与听力练习工具。全栈单仓库：React 19 SPA + Cloudflare Workers (Hono) + D1 + R2。
+个人英语阅读与听力练习工具。全栈单仓库：React 19 SPA + Cloudflare Workers (Hono) + D1 + R2 + Queues。
 
 ## 基础协作规范
 
@@ -37,6 +37,7 @@ npm run deploy          # 构建 + wrangler deploy
 - AI API Key 与 WebDAV 密码用 `ENCRYPTION_KEY` 做 AES-GCM 加密后存入 D1，绝不返回明文。
 - 数据库迁移写进 `applySchema`（幂等），新表/新列在此补充，不手工改线上库。
 - 所有 id 参数、multipart 文件名做校验/净化，动态 SQL 字段用白名单。
+- **长任务（如 AI 文章分析）必须走队列**（`ANALYSIS_QUEUE` producer + consumer），禁止用 `waitUntil` 跑长任务——平台限制 waitUntil 在响应后最多再跑 30 秒，超时被硬终止且不触发 catch，状态会永久卡死。队列消息体 `AnalyzeJob` 定义在 `worker/src/db.ts`，consumer 入口在 `worker/src/index.ts` 的 `queue` handler，核心逻辑 `handleAnalyzeJob` 导出以便单测。
 
 ## 前端规范
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import app from "./index";
 import { signToken } from "./auth";
 import type { Env } from "./auth";
+import type { AnalyzeJob } from "./db";
 import { writeAiModelConfig } from "./aiConfig";
 
 const secret = "test-encryption-key"; // 测试用 ENCRYPTION_KEY（签名密钥由它派生）
@@ -38,6 +39,7 @@ function mockEnv(): Env {
     ENCRYPTION_KEY: "test-encryption-key",
     DB: db,
     BUCKET: {} as R2Bucket,
+    ANALYSIS_QUEUE: { send: async () => {} } as unknown as Queue<AnalyzeJob>,
   };
 }
 

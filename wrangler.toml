@@ -16,3 +16,15 @@ database_id = "2697f2d4-1f5a-4266-a02c-bd2c894253a8"
 # 部署前改为真实 bucket_name。
 binding = "BUCKET"
 bucket_name = "sevent-english-assets"
+
+# AI 文章分析队列：analyze 请求只做「设 processing + 入队」，由队列 consumer 执行 AI 调用。
+# worker 的 waitUntil 任务在响应返回后最多只能再跑 30 秒（Cloudflare 平台限制），
+# 而 AI 生成完整分析需数分钟，因此长任务必须走队列（consumer wall time 15 分钟）。
+[[queues.producers]]
+binding = "ANALYSIS_QUEUE"
+queue = "article-analysis"
+
+[[queues.consumers]]
+queue = "article-analysis"
+max_batch_size = 1
+max_retries = 3

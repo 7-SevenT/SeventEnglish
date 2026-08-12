@@ -1,6 +1,7 @@
 import { createMiddleware } from "hono/factory";
 import type { MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
+import type { AnalyzeJob } from "./db";
 
 // 无状态认证：签名 cookie 直载真实会话 token，不起依赖任何 DB/KV 会话状态。
 // - verifyLogin：LOGIN 与输入密码各自 SHA-256 得到定长 hex 串，再做常数时间比较，
@@ -8,13 +9,14 @@ import { getCookie } from "hono/cookie";
 // - signToken / verifyToken：由 ENCRYPTION_KEY 经 HKDF-SHA256 派生会话签名专用 HMAC 密钥
 //   （域分离：AES-GCM 加密与 HMAC 签名使用不同派生密钥材料），对 payload 做 HMAC-SHA256 自校验签名，
 //   payload 为签发时 epoch 毫秒，验签成功后校验 7 天有效期。
-// 本模块不再 import ./db，无任何数据库状态。
+// 本模块除 type-only 导入（AnalyzeJob，用于 Env 类型）外不再 import ./db，无任何数据库状态。
 
 export interface Env {
   DB: D1Database;
   BUCKET: R2Bucket;
   LOGIN: string;
   ENCRYPTION_KEY: string; // 派生会话签名密钥 + AES-GCM 加密（域分离）
+  ANALYSIS_QUEUE: Queue<AnalyzeJob>; // AI 文章分析队列（长任务由 consumer 执行）
 }
 
 const SESSION_TTL_MS = 7 * 24 * 3600 * 1000;

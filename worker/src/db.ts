@@ -1,5 +1,10 @@
 export type AnalysisStatus = "pending" | "processing" | "completed" | "failed" | "unconfigured";
 
+// AI 文章分析队列消息体：由 analyze 路由入队，队列 consumer 消费后执行 AI 调用。
+// 长任务必须走队列：worker 的 waitUntil 任务在响应返回后最多只能再跑 30 秒（平台限制），
+// 而队列 consumer 的 wall time 上限为 15 分钟，足以容纳 AI 生成完整分析。
+export type AnalyzeJob = { id: number; title: string; content: string };
+
 export interface ArticleAnalysis {
   version: 1;
   summary?: string;

@@ -53,7 +53,7 @@ npx wrangler d1 execute <database_name> --file=./db/schema.sql --remote
 
 其中 `<database_name>` 替换为 `wrangler.toml` 中 d1_databases 的 `database_name`（如 `sevent-english-db`）。
 
-> **本地/部署绑定说明**：`wrangler.toml` 已启用 D1(`DB`) 与 R2(`BUCKET`) 绑定并回填生产资源（D1 `sevent-english-db`、R2 `sevent-english-assets`，均已在云端创建）。本地 dev 时 wrangler 会在 `.wrangler/state` 维护本地 sqlite / Miniflare 对象存储，无需真实云端资源即可本地跑通数据流。生产环境变量/密钥（`LOGIN` / `ENCRYPTION_KEY`）不写入配置文件，通过 `npx wrangler secret put <KEY> --name sevent-english` 单独配置。
+> **本地/部署绑定说明**：`wrangler.toml` 已启用 D1(`DB`)、R2(`BUCKET`) 与队列(`ANALYSIS_QUEUE` → `article-analysis`) 绑定并回填生产资源（D1 `sevent-english-db`、R2 `sevent-english-assets`、队列 `article-analysis`，均已在云端创建）。本地 dev 时 wrangler 会在 `.wrangler/state` 维护本地 sqlite / Miniflare 对象存储，无需真实云端资源即可本地跑通数据流。生产环境变量/密钥（`LOGIN` / `ENCRYPTION_KEY`）不写入配置文件，通过 `npx wrangler secret put <KEY> --name sevent-english` 单独配置。
 
 **兜底机制**：`GET /api/health`（公开探活端点）会在每次被调用时执行幂等的 `applySchema`（`CREATE TABLE IF NOT EXISTS`），可作为建表兜底。部署后调用一次 `health` 即自动建表；显式 `d1 execute` 与 health 兜底二者不冲突，可都保留。
 
@@ -69,7 +69,9 @@ npx wrangler d1 execute <database_name> --file=./db/schema.sql
 
 ### AI 配置
 
-复制 `.dev.vars.example` 为本地 `.dev.vars`，设置 `LOGIN` 和 `ENCRYPTION_KEY`。AI 的 Base URL、API Key 和模型名在管理后台的「AI模型」页面配置；API Key 会使用 `ENCRYPTION_KEY` 加密后存入 D1。已有 D1 数据库会在首次访问数据 API 时自动补齐文章分析字段和新表；AI 分析在后台执行，阅读页会自动轮询状态。也可以手动访问 `/api/health` 执行迁移。
+复制 `.dev.vars.example` 为本地 `.dev.vars`，设置 `LOGIN` 和 `ENCRYPTION_KEY`。AI 的 Base URL、API Key 和模型名在管理后台的「AI模型」页面配置；API Key 会使用 `ENCRYPTION_KEY` 加密后存入 D1。已有 D1 数据库会在首次访问数据 API 时自动补齐文章分析字段和新表；也可以手动访问 `/api/health` 执行迁移。
+
+**AI 分析任务走队列（重要）**：分析接口只做「设 `processing` + 消息入队」后立即返回，真正的 AI 调用由队列 `article-analysis` 的 consumer 执行（`worker/src/index.ts` 的 `queue` handler → `handleAnalyzeJob`）。不要用 `waitUntil` 跑分析：Cloudflare 平台限制 waitUntil 任务在响应返回后最多只能再运行 30 秒，AI 生成完整分析需数分钟，会被硬终止且不触发 JS catch，导致状态永久卡在 `processing`（表现为“一直分析中”）。consumer 的 wall time 上限为 15 分钟，AI fetch 默认 5 分钟超时（`generateArticleAnalysis` 可传参），失败会写入具体错误到 `analysis_error` 并置 `failed`，阅读页自动轮询状态、可手动重新分析。
 
 ### 前端样式
 

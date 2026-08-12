@@ -56,10 +56,23 @@ export function validateArticleAnalysis(value: unknown, paragraphs: string[]): A
 
 export const SYSTEM_PROMPT = `You are an IELTS English reading analyst. Return only valid JSON matching this shape: {"version":1,"summary":"string","paragraphs":[{"index":0,"original":"exact paragraph","translation":"Chinese translation","highlights":[{"text":"word or phrase","type":"word|phrase","meaning":"Chinese meaning","usage":"usage","example":"optional","ielts_category":"reading|writing|speaking|general"}],"writing_sentences":[{"text":"sentence","translation":"Chinese translation","usage":"IELTS usage","tags":["tag"]}]}],"writing_sentences":[]}. Preserve every paragraph original exactly. Keep highlights selective and useful; do not list ordinary words or generic explanations. For writing_sentences, select at most one sentence per paragraph and only include it when it has clearly transferable IELTS writing value (a reusable structure, contrast, concession, cause-effect, comparison, or other strong academic pattern). Never include a merely correct or ordinary sentence just to fill the field; return an empty array when no sentence is especially valuable. Apply the same strict rule to the top-level writing_sentences.`;
 
-export async function generateArticleAnalysis(config: AiModelRuntimeConfig, title: string, content: string): Promise<ArticleAnalysis> {
+export async function generateArticleAnalysis(config: AiModelRuntimeConfig, title: string, content: string, timeoutMs = 300_000): Promise<ArticleAnalysis> {
   const paragraphs = splitParagraphs(content);
   const base = config.baseUrl.replace(/\/$/, "");
-  const response = await fetch(`${base}/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` }, body: JSON.stringify({ model: config.model, temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: `Title: ${title}\n\nArticle:\n${content}` }] }) });
+  // fetch 必须带超时：AI 提供商无响应/响应过慢时若无限等待，队列 consumer 会挂到平台 wall-time 上限
+  // 才被终止，状态将长时间停留在 processing。长文章（十数段落）生成完整 JSON 分析实测需 2-5 分钟，
+  // 故默认超时设为 5 分钟（consumer 的 15 分钟 wall time 足够容纳）。
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(`${base}/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` }, signal: controller.signal, body: JSON.stringify({ model: config.model, temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: `Title: ${title}\n\nArticle:\n${content}` }] }) });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(`AI request timed out after ${timeoutMs}ms`);
+    throw error instanceof Error ? error : new Error("AI request failed");
+  } finally {
+    clearTimeout(timer);
+  }
   if (!response.ok) throw new Error(`AI request failed with status ${response.status}`);
   const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
   const text = payload.choices?.[0]?.message?.content;
