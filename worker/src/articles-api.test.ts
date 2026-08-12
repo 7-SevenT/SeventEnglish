@@ -4,7 +4,7 @@ import { signToken } from "./auth";
 import type { Env } from "./auth";
 import { writeAiModelConfig } from "./aiConfig";
 
-const secret = "test-secret";
+const secret = "test-encryption-key"; // 测试用 ENCRYPTION_KEY（签名密钥由它派生）
 
 function env() {
   const rows = new Map<number, any>([[1, { id: 1, title: "Seed", content: "C", publish_date: "2026-01-01", analysis_status: "pending", analysis_json: null, analysis_error: null }]]);
@@ -33,7 +33,7 @@ function env() {
       return { run, first, all, bind: (...p: any[]) => { params = p; return { run, first, all }; } };
     },
   } as unknown as D1Database;
-  return { LOGIN: "pw", SESSION_SECRET: secret, ENCRYPTION_KEY: "test-encryption-key", DB: db, BUCKET: {} as R2Bucket } as Env;
+  return { LOGIN: "pw", ENCRYPTION_KEY: "test-encryption-key", DB: db, BUCKET: {} as R2Bucket } as Env;
 }
 
 async function configuredEnv() {

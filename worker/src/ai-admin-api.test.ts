@@ -4,7 +4,7 @@ import { signToken } from "./auth";
 import type { Env } from "./auth";
 import { writeAiModelConfig } from "./aiConfig";
 
-const secret = "test-session-secret";
+const secret = "test-encryption-key"; // 测试用 ENCRYPTION_KEY（签名密钥由它派生）
 
 function mockEnv(): Env {
   const settings = new Map<string, string>();
@@ -35,7 +35,6 @@ function mockEnv(): Env {
   } as unknown as D1Database;
   return {
     LOGIN: "sevent",
-    SESSION_SECRET: secret,
     ENCRYPTION_KEY: "test-encryption-key",
     DB: db,
     BUCKET: {} as R2Bucket,

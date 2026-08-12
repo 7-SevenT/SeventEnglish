@@ -3,7 +3,7 @@ import app from "./index";
 import type { Env } from "./auth";
 import { signToken } from "./auth";
 
-const SECRET = "test-secret";
+const SECRET = "test-encryption-key"; // 测试用 ENCRYPTION_KEY（与 mockEnv 一致，签名密钥由它派生）
 
 // 最小可用的 mock D1：仅实现受测路由（/api/articles、/api/articles/:id）
 // 会触发的 prepare/bind/first/all 路径。边界 cast 到 D1Database。
@@ -40,7 +40,6 @@ function mockEnv(): Env {
   return {
     LOGIN: "correct-horse",
     ENCRYPTION_KEY: "test-encryption-key",
-    SESSION_SECRET: SECRET,
     DB: mockD1(),
     BUCKET: {} as R2Bucket,
   };

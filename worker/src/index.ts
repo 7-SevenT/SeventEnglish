@@ -32,7 +32,7 @@ app.post("/api/login", async (c) => {
   if (!body.password || !(await verifyLogin(c.env, body.password))) {
     return c.json({ error: "invalid credentials" }, 401);
   }
-  const token = await signToken(c.env.SESSION_SECRET, String(Date.now()));
+  const token = await signToken(c.env.ENCRYPTION_KEY, String(Date.now()));
   setCookie(c, "session", token, {
     httpOnly: true,
     sameSite: "Lax",
@@ -49,7 +49,7 @@ app.post("/api/logout", (c) => {
 
 app.get("/api/me", async (c) => {
   const t = getCookie(c, "session");
-  if (!t || !(await verifyToken(c.env.SESSION_SECRET, t))) {
+  if (!t || !(await verifyToken(c.env.ENCRYPTION_KEY, t))) {
     return c.json({ error: "unauthorized" }, 401);
   }
   return c.json({ authenticated: true });
