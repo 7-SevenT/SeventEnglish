@@ -23,7 +23,10 @@
 
 ```bash
 npm install
-npm run dev   # wrangler dev，本地调试前后端
+npm run dev        # wrangler dev，本地调试前后端（127.0.0.1:8788）
+npm test           # vitest 全量测试
+npx tsc --noEmit   # TypeScript 类型检查
+npm run build      # 生产构建
 ```
 
 ## 数据层
@@ -31,7 +34,7 @@ npm run dev   # wrangler dev，本地调试前后端
 - 数据库表结构：`db/schema.sql`（articles / word_books / units / words / settings / annotations / article_notes）。
 - 阅读标注数据：annotation 使用 ProseMirror `from_position/to_position`；从旧版 `start_offset/end_offset` 升级时会清空旧荧光标记和评论，不迁移文章与笔记。
 - 数据访问层：`worker/src/db.ts`（`applySchema` + 查询函数，`defaultSchema` 已内嵌 schema 原文）。
-- 测试：`npx vitest run worker/src/db.test.ts`（mock D1）。
+- 测试：`npm test` 全量运行；数据层单测 `npx vitest run worker/src/db.test.ts`（mock D1）。
 
 ## 部署
 

@@ -1,8 +1,27 @@
+# 依赖
 node_modules/
+
+# 构建产物
 dist/
 .wrangler/
+
+# 环境与密钥（.dev.vars.example 保留）
 .dev.vars
+.env
+.env.*
+!.env.example
+
+# 本地与调试
 *.local
+*.log
+npm-debug.log*
+*.tsbuildinfo
+coverage/
 .DS_Store
+
+# 工具目录
 .superpowers/
 .playwright-cli/
+
+# 根目录调试截图（阅读分析调试用，不入库）
+/reading-analysis-*.png
