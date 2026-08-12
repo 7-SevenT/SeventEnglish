@@ -5,12 +5,11 @@ main = "worker/src/index.ts"
 assets = { directory = "./dist", not_found_handling = "single-page-application", run_worker_first = ["/api/*"] }
 
 [[d1_databases]]
-# 本地 dev 使用占位 database_id；wrangler 会基于 database_name 在 .wrangler/state 下
-# 维护本地 sqlite。部署（--remote）前需替换为真实 D1 database_id 并执行
-# `wrangler d1 execute ... --remote` 建表（见 README 部署清单）。
+# 生产 D1 数据库（已创建：sevent-english-db，APAC 区）
+# 本地 dev 时 wrangler 会基于 database_name 在 .wrangler/state 下维护本地 sqlite。
 binding = "DB"
 database_name = "sevent-english-db"
-database_id = "local-dev-placeholder"
+database_id = "2697f2d4-1f5a-4266-a02c-bd2c894253a8"
 
 [[r2_buckets]]
 # 本地 dev 使用 Miniflare 本地对象存储（.wrangler/state），无需占用真实 R2。

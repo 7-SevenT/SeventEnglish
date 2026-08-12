@@ -53,7 +53,7 @@ npx wrangler d1 execute <database_name> --file=./db/schema.sql --remote
 
 其中 `<database_name>` 替换为 `wrangler.toml` 中 d1_databases 的 `database_name`（如 `sevent-english-db`）。
 
-> **本地/部署绑定说明**：`wrangler.toml` 现已启用 D1(`DB`) 与 R2(`BUCKET`) 绑定，本地 dev 使用占位 `database_id`（`local-dev-placeholder`，wrangler 会在 `.wrangler/state` 维护本地 sqlite / Miniflare 对象存储），无需真实云端资源即可本地跑通数据流。**部署到生产（`--remote`/`wrangler deploy`）前，需用 `wrangler d1 create` 与 `wrangler r2 bucket create` 创建真实资源，并把真实 `database_id` 回填到 `wrangler.toml`，将 `bucket_name` 改为实际桶名，再用下方命令显式建表。**
+> **本地/部署绑定说明**：`wrangler.toml` 已启用 D1(`DB`) 与 R2(`BUCKET`) 绑定并回填生产资源（D1 `sevent-english-db`、R2 `sevent-english-assets`，均已在云端创建）。本地 dev 时 wrangler 会在 `.wrangler/state` 维护本地 sqlite / Miniflare 对象存储，无需真实云端资源即可本地跑通数据流。生产环境变量/密钥（`LOGIN` / `SESSION_SECRET` / `ENCRYPTION_KEY`）不写入配置文件，通过 `npx wrangler secret put <KEY> --name sevent-english` 单独配置。
 
 **兜底机制**：`GET /api/health`（公开探活端点）会在每次被调用时执行幂等的 `applySchema`（`CREATE TABLE IF NOT EXISTS`），可作为建表兜底。部署后调用一次 `health` 即自动建表；显式 `d1 execute` 与 health 兜底二者不冲突，可都保留。
 
