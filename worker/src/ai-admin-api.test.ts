@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import app from "./index";
+import { app } from "./index";
 import { signToken } from "./auth";
 import type { Env } from "./auth";
 import type { AnalyzeJob } from "./db";

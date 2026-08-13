@@ -115,9 +115,14 @@ app.get("/api/articles/:id", async (c) => {
 // （consumer wall time 上限 15 分钟，足以容纳长任务）。
 
 async function setAnalysisStatus(env: Env, id: number, status: AnalysisStatus, error: string | null, analysisJson?: string): Promise<void> {
+  // 失败/未配置时同时清空 analysis_json，避免前端轮询到旧数据与 failed 状态共存。
+  // （前端虽按 analysis_status === "completed" 判断展示，但数据层应保持干净。）
   if (analysisJson !== undefined) {
     await env.DB.prepare("UPDATE articles SET analysis_status = ?, analysis_json = ?, analysis_error = ?, updated_at = datetime('now') WHERE id = ?")
       .bind(status, analysisJson, error, id).run();
+  } else if (status === "failed" || status === "unconfigured") {
+    await env.DB.prepare("UPDATE articles SET analysis_status = ?, analysis_json = NULL, analysis_error = ?, updated_at = datetime('now') WHERE id = ?")
+      .bind(status, error, id).run();
   } else {
     await env.DB.prepare("UPDATE articles SET analysis_status = ?, analysis_error = ?, updated_at = datetime('now') WHERE id = ?")
       .bind(status, error, id).run();
@@ -523,11 +528,10 @@ app.get("/api/audio", async (c) => {
 
 export default {
   fetch: app.fetch,
-  // Hono 便捷方法转发：`app.request(path, init, env)` 在测试中大量使用，
-  // 默认导出从 Hono app 改为 { fetch, queue } 后保留该方法以保持测试零改动。
-  request: app.request.bind(app),
-  // AI 文章分析队列 consumer：Hono 测试环境可直接调用 app.request 验证路由入队行为，
-  // consumer 核心逻辑（handleAnalyzeJob）单独导出以便单元测试驱动。
+  // AI 文章分析队列 consumer：Hono 测试环境通过命名导出 app 直接驱动路由测试，
+  // consumer 核心逻辑（handleAnalyzeJob）同样命名导出以便单元测试。
+  // 注意：默认导出只暴露 Cloudflare 认识的 handler（fetch / queue），
+  // 不要加额外属性（如 request 转发）——那会被误识别为自定义 handler。
   queue: async (batch: MessageBatch<AnalyzeJob>, env: Env) => {
     for (const message of batch.messages) {
       try {
@@ -539,4 +543,5 @@ export default {
     }
   },
 };
+export { app };
 export type App = typeof app;

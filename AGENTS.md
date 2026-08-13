@@ -27,7 +27,7 @@ npx vitest run <path>   # 单文件测试
 npx tsc --noEmit        # TypeScript 类型检查（strict）
 npm run build           # 生产构建
 npm run dev             # 本地开发（wrangler dev，127.0.0.1:8788）
-npm run deploy          # 构建 + wrangler deploy
+npm run deploy          # node scripts/deploy.mjs：build → 移除并重建 queue consumer → deploy
 ```
 
 ## 后端规范

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import app from "./index";
+import { app } from "./index";
 import type { Env } from "./auth";
 import type { AnalyzeJob } from "./db";
 import { signToken } from "./auth";

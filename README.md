@@ -39,8 +39,14 @@ npm run build      # 生产构建
 ## 部署
 
 ```bash
-npm run deploy   # npm run build + wrangler deploy
+npm run deploy   # node scripts/deploy.mjs：build → 移除 queue consumer → wrangler deploy（重建 consumer）
 ```
+
+> **为什么部署前要重建 queue consumer**：Cloudflare 平台存在 consumer 版本不跟随最新部署的问题
+> （workers-sdk#6619 等）。`wrangler deploy` 更新 worker 后，已存在的 consumer 仍运行旧版本代码
+> （2026-08-12 实测：部署 300s 超时版本后 consumer 仍执行 120s 旧版）。
+> `scripts/deploy.mjs` 先移除 consumer，再由 `wrangler deploy` 重新创建并绑定最新版本。
+> 若手动部署，请执行 `wrangler queues consumer remove article-analysis sevent-english` 后重新 `wrangler deploy`。
 
 ### 部署清单（建表）
 

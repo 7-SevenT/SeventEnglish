@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import app, { handleAnalyzeJob } from "./index";
+import { app, handleAnalyzeJob } from "./index";
 import { signToken } from "./auth";
 import type { Env } from "./auth";
 import type { AnalyzeJob } from "./db";
@@ -22,7 +22,8 @@ function env() {
           const row = rows.get(params.at(-1)); if (row) {
             row.analysis_status = params[0];
             if (params[0] === "completed") row.analysis_json = params[1];
-            if (params[0] === "failed") row.analysis_error = params[1];
+            else if (params[0] === "failed" || params[0] === "unconfigured") { row.analysis_json = null; row.analysis_error = params[1]; }
+            else row.analysis_error = params[1];
           }
         }
         if (/INSERT INTO settings/.test(sql)) settings.set(String(params[0]), String(params[1]));
