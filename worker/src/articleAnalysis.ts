@@ -97,22 +97,27 @@ export async function generateArticleAnalysis(config: AiModelRuntimeConfig, titl
   if (!response.body) throw new Error("AI response has no body stream");
 
   // 读取 SSE 流，累积所有 delta.content
-  // 流读取阶段也有自己的超时：reader.read() 可能在网络异常时无限挂起。
-  // 总超时 timeoutMs 已覆盖 fetch 阶段（AbortController），流读取阶段分配剩余时间。
+  // 流读取阶段。注意：不用 Promise.race 给 reader.read() 设超时——
+  // race 中若 timeout 先胜出，reader.read() 仍在 pending，
+  // finally 中的 releaseLock() 会抛 "outstanding read promises"。
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let accumulated = "";
   let buffer = "";
   let streamDone = false;
   let hasSseData = false;
+  const streamStart = Date.now();
   try {
     while (!streamDone) {
-      const readPromise = reader.read();
-      // 给每次 read 单独设保底超时，防止单次 read 无限挂起
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Stream read timed out")), timeoutMs),
-      );
-      const { done, value } = await Promise.race([readPromise, timeoutPromise]);
+      // 总耗时检查：超出 timeoutMs 时，若有已累积内容则直接返回
+      // （可能已经收到完整 JSON），否则抛出超时异常
+      const elapsed = Date.now() - streamStart;
+      if (elapsed > timeoutMs) {
+        if (accumulated) break;
+        throw new Error(`Stream reading timed out after ${timeoutMs}ms`);
+      }
+
+      const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       // SSE 格式：每行 "data: {json}" 以 \n 分隔，消息以 \n\n 结束
@@ -144,7 +149,7 @@ export async function generateArticleAnalysis(config: AiModelRuntimeConfig, titl
       }
     }
   } finally {
-    reader.releaseLock();
+    try { reader.releaseLock(); } catch { /* 忽略 releaseLock 错误 */ }
   }
 
   if (!accumulated) throw new Error("AI response has no content");
