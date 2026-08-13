@@ -216,16 +216,33 @@ function makeConfig(): AiModelRuntimeConfig {
   };
 }
 
-function mockFetchResponse(content: string, status = 200) {
+// 创建 SSE 流式 mock response：将 content 作为单条 delta 输出，以 [DONE] 结尾。
+function sseChunk(content: string): string {
+  // 若 content 超过 200 字符，拆分为多条 delta（模拟真实流式分片）
+  const parts: string[] = [];
+  if (content.length > 200) {
+    for (let i = 0; i < content.length; i += 200) {
+      parts.push(`data: {"choices":[{"delta":{"content":${JSON.stringify(content.slice(i, i + 200))}},"index":0}]}\n\n`);
+    }
+  } else {
+    parts.push(`data: {"choices":[{"delta":{"content":${JSON.stringify(content)}},"index":0}]}\n\n`);
+  }
+  parts.push("data: [DONE]\n\n");
+  return parts.join("");
+}
+
+function mockStreamResponse(content: string, status = 200) {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(sseChunk(content)));
+      controller.close();
+    },
+  });
   return {
     ok: status >= 200 && status < 300,
     status,
-    async json() {
-      return { choices: [{ message: { content } }] };
-    },
-    async text() {
-      return JSON.stringify({ choices: [{ message: { content } }] });
-    },
+    body,
   };
 }
 
@@ -242,7 +259,7 @@ describe("generateArticleAnalysis", () => {
       writing_sentences: [],
     });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse(body) as unknown as Response,
+      mockStreamResponse(body) as unknown as Response,
     );
     const config: AiModelRuntimeConfig = {
       baseUrl: "https://provider.example/v1",
@@ -259,6 +276,9 @@ describe("generateArticleAnalysis", () => {
         body: expect.stringContaining('"model":"model-a"'),
       }),
     );
+    // 确认流式模式已启用
+    const reqBody = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
+    expect(reqBody.stream).toBe(true);
   });
 
   it("sends request and returns validated analysis", async () => {
@@ -272,7 +292,7 @@ describe("generateArticleAnalysis", () => {
       writing_sentences: [],
     });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse(body) as unknown as Response
+      mockStreamResponse(body) as unknown as Response
     );
 
     const out = await generateArticleAnalysis(makeConfig(), "Title", validParagraphsContent);
@@ -293,7 +313,7 @@ describe("generateArticleAnalysis", () => {
     };
     const body = "```json\n" + JSON.stringify(obj) + "\n```";
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse(body) as unknown as Response
+      mockStreamResponse(body) as unknown as Response
     );
 
     const out = await generateArticleAnalysis(makeConfig(), "Title", validParagraphsContent);
@@ -321,7 +341,7 @@ describe("generateArticleAnalysis", () => {
   it("throws when analysis JSON fails validation", async () => {
     const body = JSON.stringify({ version: 2 });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse(body) as unknown as Response
+      mockStreamResponse(body) as unknown as Response
     );
 
     await expect(

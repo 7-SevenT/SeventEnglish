@@ -62,11 +62,30 @@ export async function generateArticleAnalysis(config: AiModelRuntimeConfig, titl
   // fetch 必须带超时：AI 提供商无响应/响应过慢时若无限等待，队列 consumer 会挂到平台 wall-time 上限
   // 才被终止，状态将长时间停留在 processing。长文章（十数段落）生成完整 JSON 分析实测需 2-5 分钟，
   // 故默认超时设为 5 分钟（consumer 的 15 分钟 wall time 足够容纳）。
+  //
+  // 流式（stream:true）解决 Cloudflare Workers 默认 100s 边缘代理超时（HTTP 524）：
+  // 普通 fetch 到外部 API 时，Cloudflare 边缘代理在 100 秒无响应后终止连接返回 524。
+  // DeepSeek-V4-Flash 等模型分析长文章完整 JSON 经常超过 100 秒。
+  // 启用流式后 SSE 数据持续流动，连接不会空闲超时。
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response: Response;
   try {
-    response = await fetch(`${base}/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` }, signal: controller.signal, body: JSON.stringify({ model: config.model, temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: `Title: ${title}\n\nArticle:\n${content}` }] }) });
+    response = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: config.model,
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+        stream: true,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: `Title: ${title}\n\nArticle:\n${content}` },
+        ],
+      }),
+    });
   } catch (error) {
     if (controller.signal.aborted) throw new Error(`AI request timed out after ${timeoutMs}ms`);
     throw error instanceof Error ? error : new Error("AI request failed");
@@ -74,8 +93,40 @@ export async function generateArticleAnalysis(config: AiModelRuntimeConfig, titl
     clearTimeout(timer);
   }
   if (!response.ok) throw new Error(`AI request failed with status ${response.status}`);
-  const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-  const text = payload.choices?.[0]?.message?.content;
-  if (!text) throw new Error("AI response has no content");
-  return validateArticleAnalysis(extractJson(text), paragraphs);
+  if (!response.body) throw new Error("AI response has no body stream");
+
+  // 读取 SSE 流，累积所有 delta.content
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let accumulated = "";
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // SSE 格式：每行 "data: {json}" 以 \n 分隔，消息以 \n\n 结束
+      const lines = buffer.split("\n");
+      // 保留最后未完成的行（可能不完整）
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data: ")) continue;
+        const data = trimmed.slice(6).trim();
+        if (data === "[DONE]") break;
+        try {
+          const parsed = JSON.parse(data);
+          const content = parsed?.choices?.[0]?.delta?.content;
+          if (content) accumulated += content;
+        } catch {
+          // 跳过无法解析的行
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (!accumulated) throw new Error("AI response has no content");
+  return validateArticleAnalysis(extractJson(accumulated), paragraphs);
 }
