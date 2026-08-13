@@ -78,7 +78,8 @@ export async function generateArticleAnalysis(config: AiModelRuntimeConfig, titl
       body: JSON.stringify({
         model: config.model,
         temperature: 0.2,
-        response_format: { type: "json_object" },
+        // 不使用 response_format（某些 API 与服务商不兼容 stream + json_object），
+        // 依靠 system prompt 约束模型输出 JSON + extractJson 兜底解析。
         stream: true,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
@@ -96,13 +97,22 @@ export async function generateArticleAnalysis(config: AiModelRuntimeConfig, titl
   if (!response.body) throw new Error("AI response has no body stream");
 
   // 读取 SSE 流，累积所有 delta.content
+  // 流读取阶段也有自己的超时：reader.read() 可能在网络异常时无限挂起。
+  // 总超时 timeoutMs 已覆盖 fetch 阶段（AbortController），流读取阶段分配剩余时间。
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let accumulated = "";
   let buffer = "";
+  let streamDone = false;
+  let hasSseData = false;
   try {
-    while (true) {
-      const { done, value } = await reader.read();
+    while (!streamDone) {
+      const readPromise = reader.read();
+      // 给每次 read 单独设保底超时，防止单次 read 无限挂起
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Stream read timed out")), timeoutMs),
+      );
+      const { done, value } = await Promise.race([readPromise, timeoutPromise]);
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       // SSE 格式：每行 "data: {json}" 以 \n 分隔，消息以 \n\n 结束
@@ -111,13 +121,23 @@ export async function generateArticleAnalysis(config: AiModelRuntimeConfig, titl
       buffer = lines.pop() ?? "";
       for (const line of lines) {
         const trimmed = line.trim();
-        if (!trimmed.startsWith("data: ")) continue;
+        if (!trimmed) continue;
+        // SSE 格式："data: {json}"，解析 delta.content；
+        // 非 SSE 行：若从未见过 SSE marker 则作为原始内容累积（兜底非标准流式实现）
+        if (!trimmed.startsWith("data: ")) {
+          if (!hasSseData) accumulated += trimmed + "\n";
+          continue;
+        }
+        hasSseData = true;
         const data = trimmed.slice(6).trim();
-        if (data === "[DONE]") break;
+        if (data === "[DONE]") {
+          streamDone = true;
+          break;
+        }
         try {
           const parsed = JSON.parse(data);
-          const content = parsed?.choices?.[0]?.delta?.content;
-          if (content) accumulated += content;
+          const deltaContent = parsed?.choices?.[0]?.delta?.content;
+          if (deltaContent) accumulated += deltaContent;
         } catch {
           // 跳过无法解析的行
         }
