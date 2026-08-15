@@ -11,6 +11,9 @@ dist/
 .env.*
 !.env.example
 
+# 工具数据（工作日志/本地状态，不入库）
+.workbuddy/
+
 # 本地与调试
 *.local
 *.log

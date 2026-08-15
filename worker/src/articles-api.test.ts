@@ -4,6 +4,7 @@ import { signToken } from "./auth";
 import type { Env } from "./auth";
 import type { AnalyzeJob } from "./db";
 import { writeAiModelConfig } from "./aiConfig";
+import { writeAnalyzeServiceConfig } from "./analyzeServiceConfig";
 
 const secret = "test-encryption-key"; // 测试用 ENCRYPTION_KEY（签名密钥由它派生）
 
@@ -48,6 +49,10 @@ async function configuredEnv() {
     base_url: "https://example.test/v1",
     model: "test",
     api_key: "secret",
+  });
+  await writeAnalyzeServiceConfig(e.DB, e.ENCRYPTION_KEY, {
+    url: "https://analyze.test",
+    token: "service-token",
   });
   return e;
 }
@@ -122,7 +127,7 @@ describe("article analysis API", () => {
     expect(sends[0]).toEqual({ id: 2, title: "T", content: "C" });
   });
 
-  it("consumer marks the article failed with the concrete error when AI request fails", async () => {
+  it("consumer marks the article failed with the concrete error when analyze service request fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("upstream secret")));
     const e = await configuredEnv();
     await handleAnalyzeJob(e, { id: 1, title: "Seed", content: "C" });
@@ -133,8 +138,50 @@ describe("article analysis API", () => {
     vi.unstubAllGlobals();
   });
 
-  it("consumer marks the article unconfigured when AI is not configured", async () => {
+  it("consumer stores the analysis text when the analyze service succeeds", async () => {
+    const analysisJson = JSON.stringify({ version: 1, paragraphs: [], writing_sentences: [] });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => analysisJson,
+    }));
+    const e = await configuredEnv();
+    await handleAnalyzeJob(e, { id: 1, title: "Seed", content: "C" });
+    const followup = await request("/api/articles/1", {}, e);
+    const body = await followup.json<any>();
+    expect(body.analysis_status).toBe("completed");
+    expect(body.analysis_json).toEqual(JSON.parse(analysisJson));
+    vi.unstubAllGlobals();
+  });
+
+  it("consumer surfaces the analyze service error message from a 200 error body", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: false, error: "AI request failed with status 401" }),
+    }));
+    const e = await configuredEnv();
+    await handleAnalyzeJob(e, { id: 1, title: "Seed", content: "C" });
+    const followup = await request("/api/articles/1", {}, e);
+    const body = await followup.json<any>();
+    expect(body.analysis_status).toBe("failed");
+    expect(body.analysis_error).toBe("AI request failed with status 401");
+    vi.unstubAllGlobals();
+  });
+
+  it("consumer marks the article unconfigured when analyze service is not configured", async () => {
     const e = env();
+    await handleAnalyzeJob(e, { id: 1, title: "Seed", content: "C" });
+    const followup = await request("/api/articles/1", {}, e);
+    const body = await followup.json<any>();
+    expect(body.analysis_status).toBe("unconfigured");
+  });
+
+  it("consumer marks the article unconfigured when AI model is not configured", async () => {
+    const e = env();
+    await writeAnalyzeServiceConfig(e.DB, e.ENCRYPTION_KEY, {
+      url: "https://analyze.test",
+      token: "service-token",
+    });
     await handleAnalyzeJob(e, { id: 1, title: "Seed", content: "C" });
     const followup = await request("/api/articles/1", {}, e);
     const body = await followup.json<any>();

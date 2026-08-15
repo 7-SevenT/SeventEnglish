@@ -20,10 +20,11 @@ import {
   upsertArticleNote,
 } from "./db";
 import type { AnalyzeJob, AnalysisStatus } from "./db";
-import { generateArticleAnalysis } from "./articleAnalysis";
 import type { AiModelRuntimeConfig } from "./aiConfig";
 import { readAiModelConfig, readAiModelRuntimeConfig, writeAiModelConfig } from "./aiConfig";
 import { listUpstreamModels, testUpstreamModel } from "./aiProvider";
+import { clearAnalyzeServiceConfig, readAnalyzeServicePublicConfig, readAnalyzeServiceRuntimeConfig, writeAnalyzeServiceConfig } from "./analyzeServiceConfig";
+import type { AnalyzeServiceRuntimeConfig } from "./analyzeServiceConfig";
 import { backupAll, restoreAll } from "./backup";
 import { clearWebdavConfig, readWebdavPublicConfig, writeWebdavConfig } from "./webdavConfig";
 
@@ -129,27 +130,99 @@ async function setAnalysisStatus(env: Env, id: number, status: AnalysisStatus, e
   }
 }
 
-// 队列 consumer 核心：读取 AI 配置并执行一次完整分析，结果写回 articles 表。
-// 所有可预期的失败（AI 未配置 / 请求失败 / 超时 / JSON 校验失败）都收敛为明确的
-// analysis_status 与 analysis_error，不重试（重复调用会浪费 AI 额度；用户可通过
-// “重新分析”按钮手动重试）。导出以支持单元测试直接驱动。
+// 队列 consumer 核心：把分析任务转发到 Vercel 分析服务（vercel-proxy），结果写回 articles 表。
+// 背景：Workers 免费计划 CPU 限制 10ms/请求，AI 分析（SSE 流解析 + JSON 校验）约需 2 秒 CPU，
+// 直接调用 AI 提供商会被平台以 exceededCpu 终止（重试 3 次后消息丢弃，状态永久 processing）。
+// Vercel 函数无 10ms CPU 限制，故 AI 调用移到 Vercel 执行；Worker 只做转发 + 入库（CPU 约 25ms）。
+// 所有可预期的失败（服务未配置 / 请求失败 / 超时 / 空响应）都收敛为明确的
+// analysis_status 与 analysis_error；网络层失败（本地到 Vercel 连接中断）自动重试一次。
+// 导出以支持单元测试直接驱动。
 export async function handleAnalyzeJob(env: Env, job: AnalyzeJob): Promise<void> {
-  let config: AiModelRuntimeConfig | null;
+  let service: AnalyzeServiceRuntimeConfig | null;
   try {
-    config = await readAiModelRuntimeConfig(env.DB, env.ENCRYPTION_KEY);
+    service = await readAnalyzeServiceRuntimeConfig(env.DB, env.ENCRYPTION_KEY);
   } catch (error) {
-    // 配置读取失败（如密钥解密失败）属于永久性错误，重试无意义，直接标记失败。
+    await setAnalysisStatus(env, job.id, "failed", error instanceof Error ? error.message : "analyze service config is invalid");
+    return;
+  }
+  if (!service) {
+    await setAnalysisStatus(env, job.id, "unconfigured", null);
+    return;
+  }
+  let aiConfig: AiModelRuntimeConfig | null;
+  try {
+    aiConfig = await readAiModelRuntimeConfig(env.DB, env.ENCRYPTION_KEY);
+  } catch (error) {
     await setAnalysisStatus(env, job.id, "failed", error instanceof Error ? error.message : "AI config is invalid");
     return;
   }
-  if (!config) {
+  if (!aiConfig) {
     await setAnalysisStatus(env, job.id, "unconfigured", null);
     return;
   }
   await setAnalysisStatus(env, job.id, "processing", null);
+  // 网络层失败（fetch/text 抛错）重试一次：本地/运营商到 Vercel 的长连接偶发中断时可自愈；
+  // 业务错误（Vercel 明确返回的错误/校验失败）不重试，避免重复消耗 AI 额度。
+  const callAnalyze = async (): Promise<string> => {
+    // Vercel 函数上限 300s，这里给 330s 兜底（fetch 等待是 I/O 不占 CPU，不会触发 CPU 限制）。
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 330_000);
+    let response: Response;
+    try {
+      response = await fetch(`${service.url.replace(/\/+$/, "")}/api/analyze`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${service.token}`,
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          title: job.title,
+          content: job.content,
+          baseUrl: aiConfig.baseUrl,
+          model: aiConfig.model,
+          apiKey: aiConfig.apiKey,
+        }),
+      });
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error("analyze service request timed out");
+      throw error instanceof Error ? error : new Error("analyze service request failed");
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!response.ok) {
+      let message = `analyze service returned ${response.status}`;
+      try {
+        const payload = (await response.json()) as { error?: unknown };
+        if (typeof payload?.error === "string" && payload.error) message = payload.error;
+      } catch {
+        /* 响应体不是 JSON 时保留默认错误信息 */
+      }
+      throw new Error(message);
+    }
+    // Vercel 立即返回 200 + 完整 body：成功为 analysis JSON，失败为 {"ok":false,"error":...}。
+    // 用文本前缀区分（避免 Worker 侧 JSON.parse 占用免费计划 CPU 配额）。
+    const analysisJson = (await response.text()).trim();
+    if (analysisJson.startsWith("{\"version")) return analysisJson;
+    let message = "analyze service returned an error";
+    try {
+      const payload = JSON.parse(analysisJson) as { error?: unknown };
+      if (typeof payload?.error === "string" && payload.error) message = payload.error;
+    } catch {
+      /* 非 JSON 响应时保留默认错误信息 */
+    }
+    throw new Error(message);
+  };
   try {
-    const analysis = await generateArticleAnalysis(config, job.title, job.content);
-    await setAnalysisStatus(env, job.id, "completed", null, JSON.stringify(analysis));
+    let analysisJson: string;
+    try {
+      analysisJson = await callAnalyze();
+    } catch (firstError) {
+      const message = firstError instanceof Error ? firstError.message : "";
+      if (!/network|connection|timed out|fetch failed/i.test(message)) throw firstError;
+      analysisJson = await callAnalyze();
+    }
+    await setAnalysisStatus(env, job.id, "completed", null, analysisJson);
   } catch (error) {
     await setAnalysisStatus(env, job.id, "failed", error instanceof Error ? error.message : "analysis failed");
   }
@@ -216,6 +289,37 @@ app.post("/api/admin/ai-model/test", async (c) => {
       : "AI provider request failed";
     return c.json({ error: message }, 502);
   }
+});
+
+// ---- AI 分析服务（Vercel proxy）管理 ----------------
+app.get("/api/admin/analyze-service", async (c) => {
+  try {
+    return c.json(await readAnalyzeServicePublicConfig(c.env.DB, c.env.ENCRYPTION_KEY));
+  } catch {
+    return c.json({ error: "analyze service config is invalid" }, 500);
+  }
+});
+
+app.put("/api/admin/analyze-service", async (c) => {
+  const body = await readJson<{ url?: unknown; token?: unknown }>(c.req.raw);
+  if (!body || typeof body !== "object") return c.json({ error: "bad request" }, 400);
+  const input: { url?: string; token?: string } = {};
+  for (const key of ["url", "token"] as const) {
+    const value = body[key];
+    if (value !== undefined && typeof value !== "string") return c.json({ error: "bad request" }, 400);
+    if (typeof value === "string") input[key] = value;
+  }
+  try {
+    return c.json(await writeAnalyzeServiceConfig(c.env.DB, c.env.ENCRYPTION_KEY, input));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "invalid analyze service config";
+    return c.json({ error: message }, 400);
+  }
+});
+
+app.delete("/api/admin/analyze-service", async (c) => {
+  await clearAnalyzeServiceConfig(c.env.DB);
+  return c.json({ ok: true });
 });
 
 // ---- WebDAV 备份 ----------------

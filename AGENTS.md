@@ -15,6 +15,7 @@
 ```
 src/                前端 React SPA（页面 / 组件 / hooks / lib / api）
 worker/src/         后端 Cloudflare Worker（Hono 路由 / db / auth / aiConfig / backup）
+vercel-proxy/       Vercel AI 分析代理服务（api/analyze.ts，Workers 免费计划 CPU 限制的绕行方案）
 db/schema.sql       D1 建表脚本（与 worker/src/db.ts 内嵌的 defaultSchema 一致）
 docs/superpowers/   设计文档（specs）与实施计划（plans）
 ```
@@ -38,6 +39,7 @@ npm run deploy          # node scripts/deploy.mjs：build → 移除并重建 qu
 - 数据库迁移写进 `applySchema`（幂等），新表/新列在此补充，不手工改线上库。
 - 所有 id 参数、multipart 文件名做校验/净化，动态 SQL 字段用白名单。
 - **长任务（如 AI 文章分析）必须走队列**（`ANALYSIS_QUEUE` producer + consumer），禁止用 `waitUntil` 跑长任务——平台限制 waitUntil 在响应后最多再跑 30 秒，超时被硬终止且不触发 catch，状态会永久卡死。队列消息体 `AnalyzeJob` 定义在 `worker/src/db.ts`，consumer 入口在 `worker/src/index.ts` 的 `queue` handler，核心逻辑 `handleAnalyzeJob` 导出以便单测。
+- **AI 分析经 Vercel 代理执行**：Workers 免费计划 CPU 限制 10ms/请求，直接跑 AI 分析会被 exceededCpu 终止（详见 `vercel-proxy/README.md`）。`handleAnalyzeJob` 只负责把任务转发到 Vercel `/api/analyze`（服务地址与 token 在管理后台「设置 → AI 分析服务」配置，token 加密存 D1）并入库。`vercel-proxy/api/analyze.ts` 的解析/校验逻辑与 `worker/src/articleAnalysis.ts` 保持同步，修改时两处需一起改。
 
 ## 前端规范
 

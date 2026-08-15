@@ -1,0 +1,7 @@
+{
+  "name": "sevent-english-vercel-proxy",
+  "version": "0.0.1",
+  "private": true,
+  "description": "SeventEnglish AI 文章分析代理服务（Vercel Serverless）：接收 Worker 转发请求，调用 OpenAI 兼容 API 完成分析并回传结果。",
+  "scripts": {}
+}

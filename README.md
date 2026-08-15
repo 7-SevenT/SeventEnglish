@@ -77,7 +77,17 @@ npx wrangler d1 execute <database_name> --file=./db/schema.sql
 
 复制 `.dev.vars.example` 为本地 `.dev.vars`，设置 `LOGIN` 和 `ENCRYPTION_KEY`。AI 的 Base URL、API Key 和模型名在管理后台的「AI模型」页面配置；API Key 会使用 `ENCRYPTION_KEY` 加密后存入 D1。已有 D1 数据库会在首次访问数据 API 时自动补齐文章分析字段和新表；也可以手动访问 `/api/health` 执行迁移。
 
-**AI 分析任务走队列（重要）**：分析接口只做「设 `processing` + 消息入队」后立即返回，真正的 AI 调用由队列 `article-analysis` 的 consumer 执行（`worker/src/index.ts` 的 `queue` handler → `handleAnalyzeJob`）。不要用 `waitUntil` 跑分析：Cloudflare 平台限制 waitUntil 任务在响应返回后最多只能再运行 30 秒，AI 生成完整分析需数分钟，会被硬终止且不触发 JS catch，导致状态永久卡在 `processing`（表现为“一直分析中”）。consumer 的 wall time 上限为 15 分钟，AI fetch 默认 5 分钟超时（`generateArticleAnalysis` 可传参），失败会写入具体错误到 `analysis_error` 并置 `failed`，阅读页自动轮询状态、可手动重新分析。
+**AI 分析任务走队列 + Vercel 代理（重要）**：分析接口只做「设 `processing` + 消息入队」后立即返回，真正的 AI 调用由队列 `article-analysis` 的 consumer 执行（`worker/src/index.ts` 的 `queue` handler → `handleAnalyzeJob`）。不要用 `waitUntil` 跑分析：Cloudflare 平台限制 waitUntil 任务在响应返回后最多只能再运行 30 秒，AI 生成完整分析需数分钟，会被硬终止且不触发 JS catch，导致状态永久卡在 `processing`。
+
+> **为什么分析要经过 Vercel 代理（`vercel-proxy/`）**：Workers **免费计划** CPU 限制为 10ms/请求，AI 分析（SSE 流解析 + JSON 校验）实际消耗约 2 秒 CPU，queue consumer 每次投递都会被平台以 `exceededCpu` 终止（重试 3 次后消息丢弃、状态永久卡 `processing`）。因此 AI 调用迁移到 Vercel Serverless（Hobby 函数最长 300s，无 10ms CPU 硬限制）执行：
+> 1. Worker 的 `handleAnalyzeJob` 把「文章 + 解密后的 AI 配置」转发到 Vercel 的 `/api/analyze`（Bearer token 鉴权，token 在管理后台「设置 → AI 分析服务」配置并加密存 D1，需与 Vercel 环境变量 `ANALYZE_TOKEN` 或 `TOKEN` 一致）；
+> 2. **Vercel 立即返回 200 响应头**（流式连接，规避 Cloudflare 边缘代理 100s 无响应头返回 524 的问题），后台执行分析：长文章按 `CHUNK_SIZE=2` 段分块**并行**调用 AI（16 段文章实测总耗时约 60-100s），每块失败自动重试一次（AI 偶发格式漂移）；
+> 3. 分析期间每 5s 写一个空格**保活**（避免本地网络/运营商对空闲长连接做超时断开）；完成后 `end()` 写入完整 analysis JSON，失败写入 `{"ok":false,"error":...}`；
+> 4. Worker 用 `text()` 拿响应文本，以 `{"version` 前缀区分成功/失败并直接存入 D1（不做 JSON.parse，控制免费计划 CPU 用量）；网络层失败（如本地到 Vercel 连接中断）自动重试一次。
+>
+> 部署 vercel-proxy 见 [vercel-proxy/README.md](vercel-proxy/README.md)。若使用 Workers Paid 计划（CPU 30s+），可在 `wrangler.toml` 加 `[limits] cpu_ms = 300000` 后改回 Worker 直连（`handleAnalyzeJob` 原实现见 git 历史）。
+
+consumer 的 wall time 上限为 15 分钟，Worker 转发到 Vercel 的 fetch 超时 330s（含一次网络层重试），失败会写入具体错误到 `analysis_error` 并置 `failed`，阅读页自动轮询状态、可手动重新分析。
 
 ### 前端样式
 

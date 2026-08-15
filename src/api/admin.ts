@@ -8,6 +8,13 @@ export type AiModelPublicConfig = {
   updated_at: string | null;
 };
 
+export type AnalyzeServicePublicConfig = {
+  configured: boolean;
+  url: string | null;
+  has_token: boolean;
+  updated_at: string | null;
+};
+
 export function createArticle(data: {
   title: string;
   content: string;
@@ -92,6 +99,21 @@ export function testAiModel(data?: { base_url?: string; model?: string; api_key?
     method: "POST",
     body: JSON.stringify(data ?? {}),
   });
+}
+
+export function getAnalyzeServiceConfig() {
+  return apiFetch<AnalyzeServicePublicConfig>("/admin/analyze-service");
+}
+
+export function saveAnalyzeServiceConfig(data: { url?: string; token?: string }) {
+  return apiFetch<AnalyzeServicePublicConfig>("/admin/analyze-service", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export function clearAnalyzeServiceConfig() {
+  return apiFetch<{ ok: boolean }>("/admin/analyze-service", { method: "DELETE" });
 }
 
 export function getDictationOverview() {
