@@ -24,7 +24,8 @@
 ```bash
 npm install
 npm run dev        # wrangler dev，本地调试前后端（127.0.0.1:8788）
-npm test           # vitest 全量测试
+npm test           # vitest 全量测试（含 vercel-proxy/tests/）
+npx vitest run vercel-proxy/tests/analyze.test.ts   # 单独跑 Vercel 代理测试
 npx tsc --noEmit   # TypeScript 类型检查
 npm run build      # 生产构建
 ```
