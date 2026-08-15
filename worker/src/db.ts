@@ -83,7 +83,8 @@ export interface Word {
   id: number;
   unit_id: number;
   word: string;
-  audio_key: string;
+  audio_key: string;   // 非空 = R2 key（音频词条）；空串 '' = TTS 词条
+  definition: string;  // 释义（TTS 词条可带），可为空串
   sort_order: number;
 }
 export interface Setting {
@@ -125,6 +126,7 @@ CREATE TABLE IF NOT EXISTS words (
   unit_id     INTEGER NOT NULL REFERENCES units(id),
   word        TEXT NOT NULL,
   audio_key   TEXT NOT NULL,
+  definition  TEXT NOT NULL DEFAULT '',
   sort_order  INTEGER NOT NULL DEFAULT 0
 );
 
@@ -199,6 +201,8 @@ export async function applySchema(db: D1Database): Promise<void> {
     "ALTER TABLE articles ADD COLUMN analysis_status TEXT NOT NULL DEFAULT 'pending'",
     "ALTER TABLE articles ADD COLUMN analysis_json TEXT",
     "ALTER TABLE articles ADD COLUMN analysis_error TEXT",
+    // words.definition：文本导入（TTS 词条）的释义列；audio_key 语义扩展为"空串 = TTS 词条"，无需改列约束。
+    "ALTER TABLE words ADD COLUMN definition TEXT NOT NULL DEFAULT ''",
   ];
   for (const migration of migrations) {
     try {

@@ -499,6 +499,99 @@ describe("admin words / books / units API", () => {
   });
 });
 
+describe("bulk text import API (TTS words)", () => {
+  const json = (body: unknown) => ({
+    method: "POST" as const,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  it("imports words with empty audio_key and increments sort_order", async () => {
+    const { env, ops } = mockWriteEnv();
+    const res = await requestRaw(env, "/api/units/3/words/bulk", json({ items: [{ word: "apple", definition: "苹果" }, { word: "take off" }] }));
+    expect(res.status).toBe(200);
+    const body = await res.json<{ ok: boolean; created: number; skipped: number; duplicates: string[]; invalid: string[] }>();
+    expect(body.ok).toBe(true);
+    expect(body.created).toBe(2);
+    expect(body.skipped).toBe(0);
+    const inserts = ops.filter((o) => o.stmt.startsWith("INSERT INTO words"));
+    expect(inserts.length).toBe(2);
+    // params: [unitId, word, audio_key, definition, sort_order]
+    expect(inserts[0].params).toEqual([3, "apple", "", "苹果", 1]);
+    expect(inserts[1].params).toEqual([3, "take off", "", "", 2]);
+  });
+
+  it("skips in-request duplicates and invalid entries", async () => {
+    const { env } = mockWriteEnv();
+    const res = await requestRaw(env, "/api/units/3/words/bulk", json({
+      items: [{ word: "Apple" }, { word: "apple" }, { word: "" }, { word: 42 }],
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json<{ ok: boolean; created: number; skipped: number; duplicates: string[]; invalid: string[] }>();
+    expect(body.created).toBe(1);
+    expect(body.skipped).toBe(3);
+    expect(body.duplicates).toEqual(["apple"]);
+    expect(body.invalid.length).toBe(2);
+  });
+
+  it("skips words already existing in the unit (case-insensitive)", async () => {
+    const ops: DbOp[] = [];
+    const hasUnit = (stmt: string) => /FROM units/i.test(stmt);
+    const result = (stmt: string) => ({
+      run: async () => ({}),
+      all: async () => (/FROM words/i.test(stmt) ? { results: [{ word: "apple" }], meta: {} } : { results: [], meta: {} }),
+      first: async () => (hasUnit(stmt) ? { id: 1 } : null),
+    });
+    const db = {
+      prepare(stmt: string) {
+        return {
+          ...result(stmt),
+          bind: (...params: unknown[]) => {
+            ops.push({ stmt, params });
+            return result(stmt);
+          },
+        };
+      },
+    } as unknown as D1Database;
+    const env = { ...mockEnv(), DB: db };
+    const res = await requestRaw(env, "/api/units/3/words/bulk", json({ items: [{ word: "Apple" }, { word: "banana" }] }));
+    expect(res.status).toBe(200);
+    const body = await res.json<{ ok: boolean; created: number; duplicates: string[] }>();
+    expect(body.created).toBe(1);
+    expect(body.duplicates).toEqual(["Apple"]);
+    // 已有词条 Apple 与 banana 应各插入一次，Apple 命中去重不插入
+    expect(ops.filter((o) => o.stmt.startsWith("INSERT INTO words")).length).toBe(1);
+  });
+
+  it("rejects missing/empty items → 400 and invalid unitId → 404", async () => {
+    const { env } = mockWriteEnv();
+    const missing = await requestRaw(env, "/api/units/3/words/bulk", json({}));
+    expect(missing.status).toBe(400);
+    const empty = await requestRaw(env, "/api/units/3/words/bulk", json({ items: [] }));
+    expect(empty.status).toBe(400);
+    const tooMany = await requestRaw(env, "/api/units/3/words/bulk", json({ items: Array.from({ length: 501 }, (_, i) => ({ word: `w${i}` })) }));
+    expect(tooMany.status).toBe(400);
+    const token = await signToken(SECRET, String(Date.now()));
+    for (const id of ["abc", "0", "-3", "1.5"]) {
+      const res = await app.request(`/api/units/${id}/words/bulk`, { ...json({ items: [{ word: "x" }] }), headers: { "content-type": "application/json", cookie: `session=${token}` } }, env);
+      expect(res.status).toBe(404);
+    }
+  });
+
+  it("rejects nonexistent unit → 404 without inserts", async () => {
+    const { env, ops } = mockWriteEnv(false);
+    const res = await requestRaw(env, "/api/units/99/words/bulk", json({ items: [{ word: "x" }] }));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "unit not found" });
+    expect(ops.some((o) => o.stmt.startsWith("INSERT INTO words"))).toBe(false);
+  });
+
+  it("requires auth → 401", async () => {
+    const res = await app.request("/api/units/1/words/bulk", json({ items: [{ word: "x" }] }), mockWriteEnv().env);
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("audio playback router", () => {
   it("GET /api/audio without cookie → 401", async () => {
     const res = await app.request("/api/audio?key=1/a.mp3", {}, mockWriteEnv().env);

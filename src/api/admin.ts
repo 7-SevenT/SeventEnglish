@@ -72,6 +72,21 @@ export function uploadWord(unitId: number, file: File, word?: string) {
     body: fd,
   });
 }
+
+export type BulkImportResult = {
+  ok: boolean;
+  created: number;
+  skipped: number;
+  duplicates?: string[];
+  invalid?: string[];
+};
+
+export function bulkImportWords(unitId: number, items: { word: string; definition?: string }[]) {
+  return apiFetch<BulkImportResult>(`/units/${unitId}/words/bulk`, {
+    method: "POST",
+    body: JSON.stringify({ items }),
+  });
+}
 export function deleteWord(id: number) {
   return apiFetch<{ ok: boolean }>(`/words/${id}`, { method: "DELETE" });
 }

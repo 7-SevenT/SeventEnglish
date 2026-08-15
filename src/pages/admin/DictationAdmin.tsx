@@ -8,6 +8,7 @@ import { AdminHeader } from "../../components/admin/AdminHeader";
 import { AdminToast, type ToastTone } from "../../components/admin/AdminToast";
 import { DictationImportDrawer } from "../../components/admin/DictationImportDrawer";
 import { EmptyState } from "../../components/admin/EmptyState";
+import { isSpeechSynthesisSupported } from "../../hooks/useSpeechSynthesis";
 
 export function DictationAdmin() {
   const [books, setBooks] = useState<WordBookOverview[]>([]);
@@ -112,6 +113,17 @@ export function DictationAdmin() {
     if (bookId !== null && !units[bookId]) void loadUnits(bookId);
   }
 
+  function previewTts(word: string) {
+    if (!isSpeechSynthesisSupported()) {
+      setToast({ message: "当前浏览器不支持语音合成", tone: "error" });
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(word);
+    utterance.lang = "en-US";
+    window.speechSynthesis.speak(utterance);
+  }
+
   const importBook = importState?.bookId ?? null;
   const importUnits = importBook === null ? [] : units[importBook] ?? [];
   const bookOptions = books as WordBook[];
@@ -125,12 +137,12 @@ export function DictationAdmin() {
           <div className="admin-book-card__header"><div><h2>{book.name}</h2><p>{book.description || "暂无描述"}</p></div><button type="button" className="admin-icon-button" aria-label={`删除 ${book.name}`} onClick={() => setDeleteTarget({ type: "book", id: book.id })}>×</button></div>
           <div className="admin-book-card__stats"><span><b>{book.unit_count}</b> 单元</span><span><b>{book.word_count}</b> 音频词条</span></div>
           <div className="admin-book-card__actions"><button type="button" className="btn btn--ghost btn--sm" onClick={() => void toggleBook(book.id)}>{expandedId === book.id ? "收起单元" : "查看单元"}</button><button type="button" className="btn btn--primary btn--sm" onClick={() => openImport(book.id, null)}>导入音频</button></div>
-          {expandedId === book.id && <div className="admin-unit-list"><div className="admin-unit-list__header"><span>单元</span><button type="button" className="btn btn--ghost btn--sm" onClick={() => setUnitDrawer(book.id)}>＋ 新增单元</button></div>{(units[book.id] ?? []).length === 0 ? <p className="empty">暂无单元</p> : (units[book.id] ?? []).map((unit) => <div className="admin-unit-row" key={unit.id}><div><strong>{unit.name}</strong><span>{words[unit.id] ? `${words[unit.id].length} 个词条` : "点击查看词条"}</span></div><div><button type="button" className="btn btn--ghost btn--sm" onClick={() => void loadWords(unit.id)}>查看</button><button type="button" className="btn btn--ghost btn--sm" onClick={() => openImport(book.id, unit.id)}>导入</button><button type="button" className="btn btn--danger btn--sm" onClick={() => setDeleteTarget({ type: "unit", id: unit.id, bookId: book.id })}>删除</button></div>{words[unit.id] && <div className="admin-word-list">{words[unit.id].length === 0 ? <span className="muted">暂无词条</span> : words[unit.id].map((word) => <div key={word.id}><span>{word.word}</span><button type="button" className="btn btn--danger btn--sm" onClick={() => setDeleteTarget({ type: "word", id: word.id, bookId: book.id })}>删除</button></div>)}</div>}</div>)}</div>}
+          {expandedId === book.id && <div className="admin-unit-list"><div className="admin-unit-list__header"><span>单元</span><button type="button" className="btn btn--ghost btn--sm" onClick={() => setUnitDrawer(book.id)}>＋ 新增单元</button></div>{(units[book.id] ?? []).length === 0 ? <p className="empty">暂无单元</p> : (units[book.id] ?? []).map((unit) => <div className="admin-unit-row" key={unit.id}><div><strong>{unit.name}</strong><span>{words[unit.id] ? `${words[unit.id].length} 个词条` : "点击查看词条"}</span></div><div><button type="button" className="btn btn--ghost btn--sm" onClick={() => void loadWords(unit.id)}>查看</button><button type="button" className="btn btn--ghost btn--sm" onClick={() => openImport(book.id, unit.id)}>导入</button><button type="button" className="btn btn--danger btn--sm" onClick={() => setDeleteTarget({ type: "unit", id: unit.id, bookId: book.id })}>删除</button></div>{words[unit.id] && <div className="admin-word-list">{words[unit.id].length === 0 ? <span className="muted">暂无词条</span> : words[unit.id].map((word) => <div className="admin-word-row" key={word.id}><span className="admin-word-row__main"><span>{word.word}</span>{word.audio_key ? <span className="tts-badge tts-badge--audio">音频</span> : <span className="tts-badge" title="无音频文件，听写时用浏览器语音合成朗读">TTS</span>}</span><span className="admin-word-row__actions">{!word.audio_key && <button type="button" className="btn btn--ghost btn--sm" onClick={() => previewTts(word.word)}>试听</button>}<button type="button" className="btn btn--danger btn--sm" onClick={() => setDeleteTarget({ type: "word", id: word.id, bookId: book.id })}>删除</button></span></div>)}</div>}</div>)}</div>}
         </section>
       ))}</div>}
       <AdminDrawer open={bookDrawer} title="新建单词书" onClose={() => setBookDrawer(false)} footer={<><button type="button" className="btn btn--ghost" onClick={() => setBookDrawer(false)}>取消</button><button type="button" className="btn btn--primary" onClick={() => void saveBook()}>创建单词书</button></>}><div className="admin-field"><label htmlFor="book-name">单词书名称</label><input id="book-name" className="input" value={bookName} onChange={(event) => setBookName(event.target.value)} /></div><div className="admin-field"><label htmlFor="book-description">描述 <span className="admin-field__hint">可选</span></label><textarea id="book-description" className="textarea" value={bookDescription} onChange={(event) => setBookDescription(event.target.value)} /></div></AdminDrawer>
       <AdminDrawer open={unitDrawer !== null} title="新增单元" onClose={() => setUnitDrawer(null)} footer={<><button type="button" className="btn btn--ghost" onClick={() => setUnitDrawer(null)}>取消</button><button type="button" className="btn btn--primary" onClick={() => void saveUnit()}>创建单元</button></>}><div className="admin-field"><label htmlFor="unit-name">单元名称</label><input id="unit-name" className="input" value={unitName} onChange={(event) => setUnitName(event.target.value)} /></div></AdminDrawer>
-      <DictationImportDrawer open={importState !== null} books={bookOptions} units={importUnits} bookId={importBook} unitId={importState?.unitId ?? null} onBookChange={(id) => { setImportState(() => ({ bookId: id, unitId: null })); if (id !== null && !units[id]) void loadUnits(id); }} onUnitChange={(id) => setImportState((current) => current ? { ...current, unitId: id } : current)} onClose={() => setImportState(null)} uploadWord={uploadWord} onUploaded={async () => { setToast({ message: "音频导入完成", tone: "success" }); await loadBooks(); if (importBook !== null) await loadUnits(importBook); }} />
+      <DictationImportDrawer open={importState !== null} books={bookOptions} units={importUnits} bookId={importBook} unitId={importState?.unitId ?? null} onBookChange={(id) => { setImportState(() => ({ bookId: id, unitId: null })); if (id !== null && !units[id]) void loadUnits(id); }} onUnitChange={(id) => setImportState((current) => current ? { ...current, unitId: id } : current)} onClose={() => setImportState(null)} uploadWord={uploadWord} onUploaded={async (message) => { setToast({ message: message ?? "音频导入完成", tone: "success" }); await loadBooks(); if (importBook !== null) await loadUnits(importBook); }} />
       <ConfirmDialog open={deleteTarget !== null} title="确认删除" description="删除后相关资源将无法恢复，请确认继续。" confirmLabel="确认删除" onCancel={() => setDeleteTarget(null)} onConfirm={() => void confirmDelete()} />
       {toast && <AdminToast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />}
     </>

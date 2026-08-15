@@ -4,15 +4,19 @@ import { listWords } from "../api/listen";
 import type { Word } from "../../worker/src/db";
 import { parseAnswer, isCorrectInput } from "../lib/answer";
 import type { ParsedAnswer } from "../lib/answer";
+import { useSpeechSynthesis } from "../hooks/useSpeechSynthesis";
 
 interface RoundItem {
   id: number;
   word: string;
-  audioUrl: string;
+  audioUrl: string | null; // null = TTS 词条（浏览器语音合成朗读）
+  definition: string;
   parsed: ParsedAnswer;
 }
 
 type Phase = "loading" | "ready" | "submitted" | "done";
+
+const SPEED_OPTIONS = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.5];
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -25,6 +29,7 @@ function shuffle<T>(arr: T[]): T[] {
 
 export function Practice() {
   const { unitId } = useParams();
+  const tts = useSpeechSynthesis();
 
   const [phase, setPhase] = useState<Phase>("loading");
   const [pool, setPool] = useState<RoundItem[]>([]);
@@ -44,6 +49,7 @@ export function Practice() {
   const replayModeRef = useRef(false); // true when playing a single non-current item
   const autoSequenceIndexRef = useRef<number | null>(null); // saved auto-sequence index before replay
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ttsTimer = useRef<ReturnType<typeof setTimeout> | null>(null); // cancel 后延迟 speak 的 50ms 计时器
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Keep refs in sync with state
@@ -71,7 +77,8 @@ export function Practice() {
         const items: RoundItem[] = words.map((w: Word) => ({
           id: w.id,
           word: w.word,
-          audioUrl: `/api/audio?key=${encodeURIComponent(w.audio_key)}`,
+          audioUrl: w.audio_key ? `/api/audio?key=${encodeURIComponent(w.audio_key)}` : null,
+          definition: w.definition ?? "",
           parsed: parseAnswer(w.word),
         }));
         setPool(shuffle(items));
@@ -90,13 +97,46 @@ export function Practice() {
   useEffect(() => {
     return () => {
       if (timer.current) clearTimeout(timer.current);
+      if (ttsTimer.current) clearTimeout(ttsTimer.current);
+      tts.cancel();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function clearTimer() {
     if (timer.current) {
       clearTimeout(timer.current);
       timer.current = null;
+    }
+    if (ttsTimer.current) {
+      clearTimeout(ttsTimer.current);
+      ttsTimer.current = null;
+    }
+  }
+
+  // 统一播放入口：音频词条走 <audio> 元素；TTS 词条用 speechSynthesis。
+  // TTS 播放结束（onend/onerror）都会触发 onEnded，避免序列卡死。
+  function playSource(item: RoundItem) {
+    if (!item.audioUrl) {
+      tts.cancel();
+      clearTimer();
+      // Chrome 的 speechSynthesis 在 cancel() 后立即 speak() 偶发不发声，延迟 50ms 规避。
+      ttsTimer.current = setTimeout(() => {
+        tts.speak(item.word, onEnded);
+        ttsTimer.current = null;
+      }, 50);
+      return;
+    }
+    const audio = audioRef.current;
+    if (audio) {
+      audio.src = item.audioUrl;
+      audio.load();
+      const playPromise = audio.play();
+      if (playPromise) {
+        playPromise.catch(() => {
+          // Autoplay may be blocked; ignore silently
+        });
+      }
     }
   }
 
@@ -106,17 +146,7 @@ export function Practice() {
     if (i < 0 || i >= p.length) return;
     setActiveIndex(i);
     activeIndexRef.current = i;
-    const audio = audioRef.current;
-    if (audio) {
-      audio.src = p[i].audioUrl;
-      audio.load();
-      const playPromise = audio.play();
-      if (playPromise) {
-        playPromise.catch(() => {
-          // Autoplay may be blocked; ignore silently
-        });
-      }
-    }
+    playSource(p[i]);
   }
 
   function onEnded() {
@@ -167,11 +197,11 @@ export function Practice() {
   function togglePlay() {
     if (phase !== "ready") return;
     const audio = audioRef.current;
-    if (!audio) return;
 
     if (isPlaying) {
       // Pause
-      audio.pause();
+      audio?.pause();
+      tts.cancel();
       clearTimer();
       setIsPlaying(false);
     } else {
@@ -183,9 +213,14 @@ export function Practice() {
         playItem(0);
       } else {
         // Resume from current position
-        const playPromise = audio.play();
-        if (playPromise) {
-          playPromise.catch(() => {});
+        const current = poolRef.current[activeIndexRef.current ?? -1];
+        if (current && !current.audioUrl) {
+          playSource(current);
+        } else if (audio) {
+          const playPromise = audio.play();
+          if (playPromise) {
+            playPromise.catch(() => {});
+          }
         }
       }
     }
@@ -198,19 +233,14 @@ export function Practice() {
    * - Clicking any other dot: plays that single item once, then stops.
    *   Does NOT affect the auto sequence state or enable submit.
    */
-  function playSingle(audioUrl: string, dotIndex: number) {
+  function playSingle(item: RoundItem, dotIndex: number) {
     if (phase !== "ready") return;
     clearTimer();
-    const audio = audioRef.current;
-    if (!audio) return;
 
     if (isPlaying && dotIndex === activeIndexRef.current) {
       // Replaying current item in auto sequence — stay in auto mode
       replayModeRef.current = false;
-      audio.src = audioUrl;
-      audio.load();
-      const playPromise = audio.play();
-      if (playPromise) playPromise.catch(() => {});
+      playSource(item);
     } else {
       // Single replay of a different item (or paused state)
       // Save the auto-sequence position BEFORE overwriting activeIndex
@@ -218,10 +248,7 @@ export function Practice() {
       replayModeRef.current = true;
       setActiveIndex(dotIndex);
       activeIndexRef.current = dotIndex;
-      audio.src = audioUrl;
-      audio.load();
-      const playPromise = audio.play();
-      if (playPromise) playPromise.catch(() => {});
+      playSource(item);
     }
   }
 
@@ -242,6 +269,7 @@ export function Practice() {
     setWrongIds(new Set(wrong));
     setIsPlaying(false);
     clearTimer();
+    tts.cancel();
   }
 
   function goNextRound() {
@@ -260,10 +288,13 @@ export function Practice() {
       setPhase("ready");
       setTotalRounds((r) => r + 1);
       clearTimer();
+      tts.cancel();
     }
   }
 
   const canSubmit = isFinished && phase === "ready";
+  const hasTtsItems = pool.some((item) => !item.audioUrl);
+  const showVoiceControls = hasTtsItems && tts.supported;
 
   return (
     <div className="container container--wide">
@@ -284,12 +315,41 @@ export function Practice() {
           </div>
         )}
 
+        {hasTtsItems && !tts.supported && (
+          <p className="alert alert--error">本单元含 TTS 词条，但当前浏览器不支持语音合成（speechSynthesis），这些词条无法朗读。</p>
+        )}
+
         {(phase === "ready" || phase === "submitted") && (
           <>
             <p className="listen-rounded">
               第 {totalRounds} 轮 · {pool.length} 题
               {phase === "submitted" && " · 已提交"}
             </p>
+
+            {showVoiceControls && (
+              <div className="voice-controls">
+                <label className="voice-controls__item">
+                  <span>语音</span>
+                  <select className="input" value={tts.voice?.voiceURI ?? ""} onChange={(event) => {
+                    const v = tts.voices.find((x) => x.voiceURI === event.target.value);
+                    if (v) tts.setVoice(v);
+                  }}>
+                    {tts.voices.length === 0 && <option value="">默认语音</option>}
+                    {tts.voices.map((v) => (
+                      <option key={v.voiceURI} value={v.voiceURI}>{v.name}（{v.lang}）</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="voice-controls__item">
+                  <span>语速</span>
+                  <select className="input" value={tts.rate} onChange={(event) => tts.setRate(Number(event.target.value))}>
+                    {SPEED_OPTIONS.map((r) => (
+                      <option key={r} value={r}>{r.toFixed(2).replace(/\.?0+$/, "")}x</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            )}
 
             {/* Dot navigation */}
             <div className="listen-dots">
@@ -301,7 +361,7 @@ export function Practice() {
                     (activeIndex === i ? " listen-dot--active" : "") +
                     (isPlayed[i] ? " listen-dot--done" : "")
                   }
-                  onClick={() => playSingle(item.audioUrl, i)}
+                  onClick={() => playSingle(item, i)}
                   title={item.parsed.full}
                   aria-label={`复听 ${i + 1}`}
                 />
@@ -359,7 +419,7 @@ export function Practice() {
                         }
                         title="点击圆点可复听"
                       >
-                        {result ? "✓" : `✗ ${item.parsed.full}`}
+                        {result ? "✓" : `✗ ${item.parsed.full}${!item.audioUrl && item.definition ? `（${item.definition}）` : ""}`}
                       </span>
                     )}
                   </div>

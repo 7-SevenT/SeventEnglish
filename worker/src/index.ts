@@ -379,6 +379,78 @@ app.get("/api/units/:unitId/words", async (c) => {
   return c.json(await listWords(c.env.DB, unitId));
 });
 
+// 文本批量导入（TTS 词条）：JSON body { items: [{ word, definition? }] }，单次 1-500 条。
+// 校验 + 同单元去重（大小写不敏感）+ sort_order 递增插入；audio_key 写空串 ''（语义 = TTS 词条，
+// 前端用浏览器 speechSynthesis 朗读，无需 R2 音频）。返回 created / skipped / duplicates / invalid。
+app.post("/api/units/:unitId/words/bulk", async (c) => {
+  const unitId = Number(c.req.param("unitId"));
+  if (Number.isNaN(unitId) || !Number.isInteger(unitId) || unitId <= 0) {
+    return c.json({ error: "not found" }, 404);
+  }
+  const body = await c.req.json<{ items?: unknown }>().catch(() => null);
+  if (!body || !Array.isArray(body.items)) return c.json({ error: "items required" }, 400);
+  if (body.items.length === 0 || body.items.length > 500) {
+    return c.json({ error: "items must be 1-500" }, 400);
+  }
+  const unit = await c.env.DB.prepare("SELECT id FROM units WHERE id = ?")
+    .bind(unitId)
+    .first<{ id: number }>();
+  if (!unit) return c.json({ error: "unit not found" }, 404);
+
+  // 同单元已有词条（小写）用于去重
+  const existing = await c.env.DB.prepare("SELECT LOWER(word) AS word FROM words WHERE unit_id = ?")
+    .bind(unitId)
+    .all<{ word: string }>();
+  const seen = new Set(existing.results.map((r) => r.word));
+
+  const maxRow = await c.env.DB.prepare("SELECT COALESCE(MAX(sort_order), 0) AS m FROM words WHERE unit_id = ?")
+    .bind(unitId)
+    .first<{ m: number }>();
+  let sortOrder = maxRow?.m ?? 0;
+
+  const duplicates: string[] = [];
+  const invalid: string[] = [];
+  const rows: { word: string; definition: string }[] = [];
+  for (const item of body.items) {
+    if (typeof item !== "object" || item === null) {
+      invalid.push("(invalid item)");
+      continue;
+    }
+    const word = typeof (item as { word?: unknown }).word === "string" ? (item as { word: string }).word.trim() : "";
+    if (!word || word.length > 100) {
+      invalid.push(word.slice(0, 50) || "(empty word)");
+      continue;
+    }
+    const key = word.toLowerCase();
+    if (seen.has(key)) {
+      duplicates.push(word);
+      continue;
+    }
+    seen.add(key);
+    const definition =
+      typeof (item as { definition?: unknown }).definition === "string"
+        ? (item as { definition: string }).definition.trim().slice(0, 500)
+        : "";
+    rows.push({ word, definition });
+  }
+
+  for (const row of rows) {
+    sortOrder += 1;
+    await c.env.DB.prepare(
+      "INSERT INTO words (unit_id, word, audio_key, definition, sort_order) VALUES (?, ?, ?, ?, ?)"
+    )
+      .bind(unitId, row.word, "", row.definition, sortOrder)
+      .run();
+  }
+  return c.json({
+    ok: true,
+    created: rows.length,
+    skipped: duplicates.length + invalid.length,
+    duplicates,
+    invalid,
+  });
+});
+
 // ==================== 管理后台写 API ====================
 
 function parseJson<T>(text: string): T | null {

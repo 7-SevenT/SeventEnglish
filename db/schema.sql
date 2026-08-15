@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS words (
   unit_id     INTEGER NOT NULL REFERENCES units(id),
   word        TEXT NOT NULL,
   audio_key   TEXT NOT NULL,
+  definition  TEXT NOT NULL DEFAULT '',
   sort_order  INTEGER NOT NULL DEFAULT 0
 );
 
