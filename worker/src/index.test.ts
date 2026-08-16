@@ -173,36 +173,50 @@ interface DbOp {
   params: unknown[];
 }
 
-function DB_OK(unitExists = true, stmt?: string) {
+function DB_OK(unitExists = true, stmt?: string, wordKeys: string[] = []) {
   return {
     run: async () => ({}),
-    all: async () => ({ results: [], meta: {} }),
-    first: async () =>
-      unitExists && stmt && /FROM units/i.test(stmt) ? { id: 1 } : null,
+    all: async () => {
+      // 删书/删单元时收集 R2 音频 key（audio_key 非空）
+      if (stmt && /SELECT .*audio_key FROM words/i.test(stmt)) {
+        return { results: wordKeys.map((audio_key) => ({ audio_key })), meta: {} };
+      }
+      return { results: [], meta: {} };
+    },
+    first: async () => {
+      if (stmt && /FROM units/i.test(stmt)) return unitExists ? { id: 1 } : null;
+      // 删词时查询 audio_key：wordKeys 有值返回首个 key，否则视为 TTS 词条（空串，存在）
+      if (stmt && /SELECT audio_key FROM words/i.test(stmt)) {
+        return wordKeys.length ? { audio_key: wordKeys[0] } : { audio_key: "" };
+      }
+      return null;
+    },
   };
 }
 
 // push 每次 bind 后的完整语句到 ops，供断言使用；prepare 返回的语句在无 bind 时也可直接 first/all/run（如 lastRowId）。
 // unitExists 控制 POST /api/words 的 unit 存在性校验结果：默认存在（返回 {id:1}），
 // 传 false 时单位 SELECT 返回 null → 模拟 unit 不存在路径。
-function mockWriteDb(ops: DbOp[], unitExists = true): D1Database {
+// wordKeys 控制删除路由查询到的 R2 音频 key（删词取首个，删书/删单元取全部）。
+function mockWriteDb(ops: DbOp[], unitExists = true, wordKeys: string[] = []): D1Database {
   return {
     prepare(stmt: string) {
       return {
-        ...DB_OK(unitExists, stmt),
+        ...DB_OK(unitExists, stmt, wordKeys),
         bind: (...params: unknown[]) => {
           ops.push({ stmt, params });
-          return DB_OK(unitExists, stmt);
+          return DB_OK(unitExists, stmt, wordKeys);
         },
       };
     },
   } as unknown as D1Database;
 }
 
-// 用于监听 DB 写入与 R2 上传的 mock 环境。
-function mockWriteEnv(unitExists = true) {
+// 用于监听 DB 写入、R2 上传与删除的 mock 环境。
+function mockWriteEnv(unitExists = true, wordKeys: string[] = []) {
   const ops: DbOp[] = [];
   const objStore = new Set<string>();
+  const deletes: string[] = [];
   const r2 = {
     async put(
       key: string,
@@ -213,6 +227,10 @@ function mockWriteEnv(unitExists = true) {
       const md = opts?.httpMetadata;
       puts.push({ key, contentType: (md && "contentType" in md && md.contentType) || undefined });
       return {};
+    },
+    async delete(key: string) {
+      deletes.push(key);
+      objStore.delete(key);
     },
     async get(key: string) {
       if (!objStore.has(key)) return null;
@@ -228,12 +246,13 @@ function mockWriteEnv(unitExists = true) {
     },
   } as unknown as R2Bucket;
   const puts: { key: string; contentType?: string }[] = [];
-  const db = mockWriteDb(ops, unitExists);
+  const db = mockWriteDb(ops, unitExists, wordKeys);
   return {
     env: { ...mockEnv(), DB: db as unknown as D1Database, BUCKET: r2 },
     ops,
     puts,
     objStore,
+    deletes,
   };
 }
 
@@ -489,13 +508,48 @@ describe("admin words / books / units API", () => {
     expect(res.status).toBe(400);
   });
 
-  it("DELETE /api/words/:id invalid id → 404; valid runs delete", async () => {
+  it("DELETE /api/words/:id invalid id → 404; valid runs delete and cleans up R2", async () => {
     const bad = await requestRaw(mockWriteEnv().env, "/api/words/abc", { method: "DELETE" });
     expect(bad.status).toBe(404);
-    const { env, ops } = mockWriteEnv();
+    // 音频词条：删 DB 记录 + 删 R2 对象
+    const { env, ops, deletes, objStore } = mockWriteEnv(true, ["3/123-hello.mp3"]);
+    objStore.add("3/123-hello.mp3");
     const res = await requestRaw(env, "/api/words/9", { method: "DELETE" });
     expect(res.status).toBe(200);
     expect(ops.some((o) => o.stmt.startsWith("DELETE FROM words"))).toBe(true);
+    expect(deletes).toEqual(["3/123-hello.mp3"]);
+    // TTS 词条（audio_key 空串）：不触发 R2 删除
+    const { env: env2, ops: ops2, deletes: deletes2 } = mockWriteEnv(true, []);
+    const res2 = await requestRaw(env2, "/api/words/8", { method: "DELETE" });
+    expect(res2.status).toBe(200);
+    expect(ops2.some((o) => o.stmt.startsWith("DELETE FROM words"))).toBe(true);
+    expect(deletes2).toEqual([]);
+  });
+
+  it("DELETE /api/units/:id removes words first (FK-safe) and cleans up R2", async () => {
+    const { env, ops, deletes } = mockWriteEnv(true, ["5/1-a.mp3", "5/2-b.mp3"]);
+    const res = await requestRaw(env, "/api/units/3", { method: "DELETE" });
+    expect(res.status).toBe(200);
+    const statements = ops.map((o) => o.stmt);
+    const wordsIdx = statements.findIndex((s) => s.startsWith("DELETE FROM words"));
+    const unitsIdx = statements.findIndex((s) => s.startsWith("DELETE FROM units"));
+    expect(wordsIdx).toBeGreaterThanOrEqual(0);
+    expect(unitsIdx).toBeGreaterThan(wordsIdx); // 子表先删，避免 D1 外键约束报错
+    expect(deletes.sort()).toEqual(["5/1-a.mp3", "5/2-b.mp3"]);
+  });
+
+  it("DELETE /api/books/:id removes child words and units first (FK-safe)", async () => {
+    const { env, ops, deletes } = mockWriteEnv(true, ["5/1-a.mp3"]);
+    const res = await requestRaw(env, "/api/books/2", { method: "DELETE" });
+    expect(res.status).toBe(200);
+    const statements = ops.map((o) => o.stmt);
+    const wordsIdx = statements.findIndex((s) => s.startsWith("DELETE FROM words"));
+    const unitsIdx = statements.findIndex((s) => s.startsWith("DELETE FROM units"));
+    const booksIdx = statements.findIndex((s) => s.startsWith("DELETE FROM word_books"));
+    expect(wordsIdx).toBeGreaterThanOrEqual(0);
+    expect(unitsIdx).toBeGreaterThan(wordsIdx);
+    expect(booksIdx).toBeGreaterThan(unitsIdx);
+    expect(deletes).toEqual(["5/1-a.mp3"]);
   });
 });
 
@@ -625,14 +679,19 @@ describe("health endpoint schema bootstrap (Fix 2)", () => {
     const db = {
       ...base,
       // applySchema 现改为 prepare().run() 逐条执行 DDL（见 db.ts：兼容 workerd 内建 D1 对
-      // db.exec() 多语句脚本的 "incomplete input" 限制）。health 测试 mock 需提供 prepare().run()。
+      // db.exec() 多语句脚本的 "incomplete input" 限制）。health 测试 mock 需提供 prepare().run()
+      // 与 bind().run()（applySchema 写 schema_version 标记走 bind().run() 路径）。
       prepare(stmt: string) {
         const inner = base.prepare(stmt);
         const run = async () => {
           statementsRun++;
           return { success: true, results: [] };
         };
-        return { ...inner, run };
+        return {
+          ...inner,
+          run,
+          bind: (...params: unknown[]) => ({ ...inner.bind(...params), run }),
+        };
       },
     } as unknown as D1Database;
     const env = { ...mockEnv(), DB: db };

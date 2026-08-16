@@ -139,8 +139,6 @@ export type ReadingDocumentProps = {
   annotations: Annotation[];
   onSelectionChange: (selection: ReadingSelection | null) => void;
   onAnnotationClick?: (annotation: Annotation) => void;
-  onEditComment?: (annotation: Annotation) => void;
-  onDeleteAnnotation?: (annotation: Annotation) => void;
   showAnalysis?: boolean;
 };
 

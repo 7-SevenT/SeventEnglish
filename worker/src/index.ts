@@ -466,6 +466,16 @@ async function readJson<T>(req: Request): Promise<T | null> {
   return typeof body === "string" ? parseJson<T>(body) : null;
 }
 
+// 批量删除 R2 音频对象。audio_key 非空才是 R2 对象（TTS 词条 audio_key 为空串），
+// 删除失败仅告警不中断（R2 偶发错误不应让删除 API 失败）。
+async function deleteR2Audio(bucket: R2Bucket, audioKeys: string[]): Promise<void> {
+  await Promise.all(
+    audioKeys
+      .filter((key) => key)
+      .map((key) => bucket.delete(key).catch(() => undefined))
+  );
+}
+
 // 与读路由同一口径的非法 id 防护。
 function isInvalidId(value: string): boolean {
   const n = Number(value);
@@ -576,6 +586,12 @@ app.patch("/api/articles/:id", async (c) => {
   )
     .bind(title, content, publish_date, Number(id))
     .run();
+  // 正文变更后旧分析结果与内容错位（段落 index/原文不匹配），
+  // 重置分析状态并重新入队；仅改标题/日期时不触发，避免浪费 AI 额度。
+  if (content !== article.content) {
+    await setAnalysisStatus(c.env, article.id, "processing", null);
+    await enqueueAnalysis(c, article.id, title, content);
+  }
   return c.json(await getArticle(c.env.DB, Number(id)));
 });
 
@@ -603,9 +619,16 @@ app.post("/api/books", async (c) => {
 app.delete("/api/books/:id", async (c) => {
   const id = c.req.param("id");
   if (isInvalidId(id)) return c.json({ error: "not found" }, 404);
-  await c.env.DB.prepare("DELETE FROM word_books WHERE id = ?")
-    .bind(Number(id))
-    .run();
+  // D1 默认强制外键约束：删除父行前必须先删子行（words → units），
+  // 否则 FOREIGN KEY constraint failed → 500（见 schema 注释）。
+  // 同时收集该书全部音频 key 一并清理，避免 R2 孤儿对象。
+  const { results: audioRows } = await c.env.DB.prepare(
+    "SELECT w.audio_key FROM words w JOIN units u ON w.unit_id = u.id WHERE u.book_id = ? AND w.audio_key != ''"
+  ).bind(Number(id)).all<{ audio_key: string }>();
+  await c.env.DB.prepare("DELETE FROM words WHERE unit_id IN (SELECT id FROM units WHERE book_id = ?)").bind(Number(id)).run();
+  await c.env.DB.prepare("DELETE FROM units WHERE book_id = ?").bind(Number(id)).run();
+  await c.env.DB.prepare("DELETE FROM word_books WHERE id = ?").bind(Number(id)).run();
+  await deleteR2Audio(c.env.BUCKET, audioRows.map((row) => row.audio_key));
   return c.json({ ok: true });
 });
 
@@ -626,9 +649,13 @@ app.post("/api/books/:bookId/units", async (c) => {
 app.delete("/api/units/:id", async (c) => {
   const id = c.req.param("id");
   if (isInvalidId(id)) return c.json({ error: "not found" }, 404);
-  await c.env.DB.prepare("DELETE FROM units WHERE id = ?")
-    .bind(Number(id))
-    .run();
+  // 同删除单词书：先删子表 words（D1 强制外键），再删单元，并清理 R2 音频对象。
+  const { results: audioRows } = await c.env.DB.prepare(
+    "SELECT audio_key FROM words WHERE unit_id = ? AND audio_key != ''"
+  ).bind(Number(id)).all<{ audio_key: string }>();
+  await c.env.DB.prepare("DELETE FROM words WHERE unit_id = ?").bind(Number(id)).run();
+  await c.env.DB.prepare("DELETE FROM units WHERE id = ?").bind(Number(id)).run();
+  await deleteR2Audio(c.env.BUCKET, audioRows.map((row) => row.audio_key));
   return c.json({ ok: true });
 });
 
@@ -682,10 +709,11 @@ app.post("/api/words", async (c) => {
 app.delete("/api/words/:id", async (c) => {
   const id = c.req.param("id");
   if (isInvalidId(id)) return c.json({ error: "not found" }, 404);
-  // 仅删 DB 记录；R2 对象删除可选，框架阶段先不删对象。
-  await c.env.DB.prepare("DELETE FROM words WHERE id = ?")
-    .bind(Number(id))
-    .run();
+  const existing = await c.env.DB.prepare("SELECT audio_key FROM words WHERE id = ?").bind(Number(id)).first<{ audio_key: string }>();
+  if (!existing) return c.json({ error: "not found" }, 404);
+  await c.env.DB.prepare("DELETE FROM words WHERE id = ?").bind(Number(id)).run();
+  // 顺带清理 R2 音频对象（TTS 词条 audio_key 为空串，跳过）。
+  await deleteR2Audio(c.env.BUCKET, [existing.audio_key]);
   return c.json({ ok: true });
 });
 
@@ -698,6 +726,8 @@ app.get("/api/audio", async (c) => {
   return new Response(object.body, {
     headers: {
       "Content-Type": object.httpMetadata?.contentType ?? "audio/mpeg",
+      // 音频 key 含时间戳（unitId/timestamp-sanitizedName），内容不可变，可安全长缓存。
+      "Cache-Control": "public, max-age=31536000, immutable",
     },
   });
 });

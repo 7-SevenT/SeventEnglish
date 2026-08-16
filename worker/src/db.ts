@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS word_books (
 
 CREATE TABLE IF NOT EXISTS units (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  book_id     INTEGER NOT NULL REFERENCES word_books(id),
+  book_id     INTEGER NOT NULL REFERENCES word_books(id) ON DELETE CASCADE,
   name        TEXT NOT NULL,
   sort_order  INTEGER NOT NULL DEFAULT 0,
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS units (
 
 CREATE TABLE IF NOT EXISTS words (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  unit_id     INTEGER NOT NULL REFERENCES units(id),
+  unit_id     INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
   word        TEXT NOT NULL,
   audio_key   TEXT NOT NULL,
   definition  TEXT NOT NULL DEFAULT '',
@@ -162,7 +162,23 @@ CREATE INDEX IF NOT EXISTS idx_annotations_article_id ON annotations(article_id)
 CREATE INDEX IF NOT EXISTS idx_article_notes_article_id ON article_notes(article_id);
 `;
 
+// 当前 schema/迁移版本：每次有新的 DDL/迁移时递增。
+// applySchema 会读取 settings 表中的 schema_version 标记，
+// 已是最新版本时直接返回（避免每个请求都重复执行建表/迁移语句）。
+const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION_KEY = "schema_version";
+
 export async function applySchema(db: D1Database): Promise<void> {
+  // 版本标记：已迁移到最新则跳过（settings 表可能尚未创建，读取失败视为未迁移）。
+  let currentVersion = 0;
+  try {
+    const row = await db.prepare("SELECT value FROM settings WHERE key = ?").bind(SCHEMA_VERSION_KEY).first<{ value: string }>();
+    currentVersion = Number(row?.value ?? 0);
+  } catch {
+    currentVersion = 0;
+  }
+  if (Number.isFinite(currentVersion) && currentVersion >= SCHEMA_VERSION) return;
+
   // workerd 内置 D1 的 db.exec() 对多语句脚本或单条 CREATE TABLE 会抛
   // "incomplete input"（sqlite shell 风格解析限制），因此改用 prepare().run()
   // 逐条执行 DDL。schema 语句内不含内联分号，split(';') 后再 trim 安全。
@@ -211,6 +227,11 @@ export async function applySchema(db: D1Database): Promise<void> {
       if (!/duplicate column name/i.test(String(error))) throw error;
     }
   }
+
+  // 迁移完成，写入版本标记（settings 表此时已存在）。
+  await db.prepare(
+    "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+  ).bind(SCHEMA_VERSION_KEY, String(SCHEMA_VERSION)).run();
 }
 
 export async function listArticlesGroupedByDate(db: D1Database) {

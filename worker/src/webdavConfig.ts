@@ -76,7 +76,8 @@ export async function readWebdavPublicConfig(db: D1Database, _encryptionKey: str
 
 /**
  * 保存 WebDAV 配置：只更新提供的字段，缺省字段保留现值。
- * url/username 传空字符串表示清除；password 传空字符串表示保留原密码。
+ * 注意：url/username 传空字符串会报错（视为无效输入），清除配置请调用 DELETE /api/admin/webdav；
+ * password 传空字符串表示保留原密码。
  */
 export async function writeWebdavConfig(
   db: D1Database,

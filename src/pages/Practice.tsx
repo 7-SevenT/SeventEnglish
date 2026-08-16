@@ -41,6 +41,9 @@ export function Practice() {
   const [isFinished, setIsFinished] = useState(false);
   const [isPlayed, setIsPlayed] = useState<boolean[]>([]);
   const [totalRounds, setTotalRounds] = useState(1);
+  const [error, setError] = useState("");
+  const [isEmpty, setIsEmpty] = useState(false);
+  const [retryTick, setRetryTick] = useState(0);
 
   // Refs to avoid stale closures in audio event handlers
   const activeIndexRef = useRef<number | null>(null);
@@ -63,14 +66,18 @@ export function Practice() {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
 
-  // Load words on mount
+  // Load words on mount（失败可重试）
   useEffect(() => {
     if (!unitId) return;
     let cancelled = false;
+    setError("");
+    setIsEmpty(false);
+    setPhase("loading");
     listWords(Number(unitId))
       .then((words) => {
         if (cancelled) return;
         if (words.length === 0) {
+          setIsEmpty(true);
           setPhase("done");
           return;
         }
@@ -85,13 +92,15 @@ export function Practice() {
         setIsPlayed(new Array(items.length).fill(false));
         setPhase("ready");
       })
-      .catch(() => {
-        if (!cancelled) setPhase("done");
+      .catch((cause) => {
+        // 加载失败必须显示错误，不能伪装成"练习完成"。
+        if (cancelled) return;
+        setError(cause instanceof Error ? cause.message : "词条加载失败");
       });
     return () => {
       cancelled = true;
     };
-  }, [unitId]);
+  }, [unitId, retryTick]);
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -304,15 +313,28 @@ export function Practice() {
       <div className="practice-card">
         <h1 className="page-title">听写练习</h1>
 
-        {phase === "loading" && <p className="empty">加载中...</p>}
+        {phase === "loading" && (
+          error ? (
+            <div className="alert alert--error" role="alert">
+              {error}
+              <button type="button" className="btn btn--ghost btn--sm" style={{ marginLeft: "var(--space-3)" }} onClick={() => setRetryTick((tick) => tick + 1)}>重试</button>
+            </div>
+          ) : (
+            <p className="empty">加载中...</p>
+          )
+        )}
 
         {phase === "done" && (
-          <div style={{ textAlign: "center" }}>
-            <p className="feedback feedback--correct">
-              本单元练习完成 🎉
-            </p>
-            <p className="listen-rounded">共 {totalRounds} 轮</p>
-          </div>
+          isEmpty ? (
+            <p className="empty">本单元暂无词条，请先在管理后台添加。</p>
+          ) : (
+            <div style={{ textAlign: "center" }}>
+              <p className="feedback feedback--correct">
+                本单元练习完成 🎉
+              </p>
+              <p className="listen-rounded">共 {totalRounds} 轮</p>
+            </div>
+          )
         )}
 
         {hasTtsItems && !tts.supported && (
