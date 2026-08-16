@@ -713,3 +713,132 @@ describe("health endpoint schema bootstrap (Fix 2)", () => {
     expect(statementsRun).toBeGreaterThan(0);
   });
 });
+
+// ---- 单元拖拽排序（PATCH /api/books/:bookId/units/order）----
+
+describe("unit reorder API", () => {
+  const json = (body: unknown) => ({
+    method: "PATCH" as const,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  // ownedIds = 该 book 下真实存在的单元 id；mock 的 SELECT 按提交 ids 过滤返回。
+  function reorderEnv(ownedIds: number[]) {
+    const ops: DbOp[] = [];
+    let boundParams: unknown[] = [];
+    const all = async () => {
+      if (/SELECT id FROM units/i.test(boundParams[0] as string)) {
+        const ids = boundParams.slice(1).map(Number);
+        return { results: ownedIds.filter((id) => ids.includes(id)).map((id) => ({ id })), meta: {} };
+      }
+      return { results: [], meta: {} };
+    };
+    const db = {
+      prepare(stmt: string) {
+        return {
+          first: async () => null,
+          all,
+          run: async () => ({}),
+          bind: (...params: unknown[]) => {
+            boundParams = [stmt, ...params];
+            ops.push({ stmt, params });
+            return { first: async () => null, all, run: async () => ({}) };
+          },
+        };
+      },
+      batch: async (stmts: Array<{ run: () => Promise<unknown> }>) => {
+        const out: unknown[] = [];
+        for (const s of stmts) out.push(await s.run());
+        return out;
+      },
+    } as unknown as D1Database;
+    return { env: { ...mockEnv(), DB: db }, ops };
+  }
+
+  it("rewrites sort_order following the submitted id order", async () => {
+    const { env, ops } = reorderEnv([5, 3]);
+    const res = await requestRaw(env, "/api/books/2/units/order", json({ ids: [5, 3] }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    const updates = ops.filter((o) => o.stmt.startsWith("UPDATE units"));
+    expect(updates.map((u) => u.params)).toEqual([[0, 5], [1, 3]]);
+  });
+
+  it("rejects empty/malformed ids and ids not owned by the book", async () => {
+    const { env } = reorderEnv([5, 3]);
+    const empty = await requestRaw(env, "/api/books/2/units/order", json({ ids: [] }));
+    expect(empty.status).toBe(400);
+    const malformed = await requestRaw(env, "/api/books/2/units/order", json({ ids: ["x"] }));
+    expect(malformed.status).toBe(400);
+    // 提交 [5,99]，99 不属于该书 → 校验数量不匹配 → 404
+    const notOwned = await requestRaw(env, "/api/books/2/units/order", json({ ids: [5, 99] }));
+    expect(notOwned.status).toBe(404);
+  });
+});
+
+// ---- 单词编辑（PATCH /api/words/:id，不动音频）----
+
+describe("word edit API", () => {
+  const json = (body: unknown) => ({
+    method: "PATCH" as const,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  function wordEnv({ exists = true, duplicate = false }: { exists?: boolean; duplicate?: boolean } = {}) {
+    const ops: DbOp[] = [];
+    const db = {
+      prepare(stmt: string) {
+        const first = async () => {
+          // 主查询：SELECT id, unit_id, word, definition FROM words WHERE id = ?
+          if (/FROM words WHERE id = \?/i.test(stmt)) {
+            if (!exists) return null;
+            return { id: 7, unit_id: 3, word: "apple", definition: "苹果" };
+          }
+          // 同单元重名检查：SELECT id FROM words WHERE unit_id = ? AND lower(word) = lower(?) AND id != ?
+          if (/lower\(word\) = lower\(\?\)/i.test(stmt)) return duplicate ? { id: 99 } : null;
+          return null;
+        };
+        return {
+          first,
+          all: async () => ({ results: [], meta: {} }),
+          run: async () => ({}),
+          bind: (...params: unknown[]) => {
+            ops.push({ stmt, params });
+            return { first, all: async () => ({ results: [], meta: {} }), run: async () => ({}) };
+          },
+        };
+      },
+      batch: async () => [],
+    } as unknown as D1Database;
+    return { env: { ...mockEnv(), DB: db }, ops };
+  }
+
+  it("updates word text and definition without touching audio_key", async () => {
+    const { env, ops } = wordEnv();
+    const res = await requestRaw(env, "/api/words/7", json({ word: "Apple", definition: "苹果（修订）" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    const update = ops.find((o) => o.stmt.startsWith("UPDATE words"));
+    expect(update?.stmt).not.toContain("audio_key");
+    expect(update?.params).toEqual(["Apple", "苹果（修订）", 7]);
+  });
+
+  it("rejects duplicate word within the unit → 409", async () => {
+    const { env } = wordEnv({ duplicate: true });
+    const res = await requestRaw(env, "/api/words/7", json({ word: "banana" }));
+    expect(res.status).toBe(409);
+  });
+
+  it("rejects missing word, nonexistent word, and malformed body", async () => {
+    const { env } = wordEnv();
+    const blank = await requestRaw(env, "/api/words/7", json({ word: "  " }));
+    expect(blank.status).toBe(400);
+    const missing = await requestRaw(env, "/api/words/7", json({}));
+    expect(missing.status).toBe(200); // 无 word 时保留原值，仅更新 definition 场景
+    const { env: missingEnv } = wordEnv({ exists: false });
+    const notFound = await requestRaw(missingEnv, "/api/words/7", json({ word: "x" }));
+    expect(notFound.status).toBe(404);
+  });
+});

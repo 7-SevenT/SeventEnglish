@@ -662,6 +662,29 @@ app.delete("/api/units/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// ---- 单元拖拽排序 ----
+// body: { ids: number[] }（按新展示顺序）。校验 id 全部属于该书后按序重写 sort_order，
+// 一次性 batch 提交。用于管理端拖动排序。
+app.patch("/api/books/:bookId/units/order", async (c) => {
+  const bookId = c.req.param("bookId");
+  if (isInvalidId(bookId)) return c.json({ error: "not found" }, 404);
+  const body = await readJson<{ ids?: unknown }>(c.req.raw);
+  const ids = body?.ids;
+  if (!Array.isArray(ids) || ids.length === 0) return c.json({ error: "missing ids" }, 400);
+  if (!ids.every((value) => Number.isInteger(value) && (value as number) > 0)) return c.json({ error: "invalid ids" }, 400);
+  const unitIds = ids.map(Number);
+  const placeholders = unitIds.map(() => "?").join(", ");
+  const { results: owned } = await c.env.DB.prepare(
+    `SELECT id FROM units WHERE book_id = ? AND id IN (${placeholders})`
+  ).bind(Number(bookId), ...unitIds).all<{ id: number }>();
+  if (owned.length !== unitIds.length) return c.json({ error: "unit not found" }, 404);
+  const stmts = unitIds.map((id, index) =>
+    c.env.DB.prepare("UPDATE units SET sort_order = ? WHERE id = ?").bind(index, id)
+  );
+  await c.env.DB.batch(stmts);
+  return c.json({ ok: true });
+});
+
 // ---- 单词 + 音频上传 ----
 // multipart form：field "unitId"（数字）、"word"（可选）、"audio"（文件）。
 // word 缺省取去除扩展名的音频文件名（"音频文件名即答案"）。
@@ -717,6 +740,30 @@ app.delete("/api/words/:id", async (c) => {
   await c.env.DB.prepare("DELETE FROM words WHERE id = ?").bind(Number(id)).run();
   // 顺带清理 R2 音频对象（TTS 词条 audio_key 为空串，跳过）。
   await deleteR2Audio(c.env.BUCKET, [existing.audio_key]);
+  return c.json({ ok: true });
+});
+
+// ---- 单词编辑（不改变音频）----
+// body: { word?, definition? }。只更新文本字段，audio_key 保持不变（音频词条编辑后音频不变；
+// TTS 词条仍为 TTS）。同单元重名校验（大小写不敏感，排除自身）。
+app.patch("/api/words/:id", async (c) => {
+  const id = c.req.param("id");
+  if (isInvalidId(id)) return c.json({ error: "not found" }, 404);
+  const existing = await c.env.DB.prepare("SELECT id, unit_id, word, definition FROM words WHERE id = ?")
+    .bind(Number(id)).first<{ id: number; unit_id: number; word: string; definition: string }>();
+  if (!existing) return c.json({ error: "not found" }, 404);
+  const body = await readJson<{ word?: unknown; definition?: unknown }>(c.req.raw);
+  if (body === null || typeof body !== "object") return c.json({ error: "bad request" }, 400);
+  const nextWord = typeof body.word === "string" ? body.word.trim() : existing.word;
+  const hasDefinition = typeof body.definition === "string";
+  if (!nextWord) return c.json({ error: "missing word" }, 400);
+  const dup = await c.env.DB.prepare(
+    "SELECT id FROM words WHERE unit_id = ? AND lower(word) = lower(?) AND id != ?"
+  ).bind(existing.unit_id, nextWord, existing.id).first<{ id: number }>();
+  if (dup) return c.json({ error: "duplicate word" }, 409);
+  const definition = hasDefinition ? body.definition : existing.definition;
+  await c.env.DB.prepare("UPDATE words SET word = ?, definition = ? WHERE id = ?")
+    .bind(nextWord, definition, existing.id).run();
   return c.json({ ok: true });
 });
 

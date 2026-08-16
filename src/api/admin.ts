@@ -62,6 +62,18 @@ export function createUnit(
 export function deleteUnit(id: number) {
   return apiFetch<{ ok: boolean }>(`/units/${id}`, { method: "DELETE" });
 }
+export function reorderUnits(bookId: number, ids: number[]) {
+  return apiFetch<{ ok: boolean }>(`/books/${bookId}/units/order`, {
+    method: "PATCH",
+    body: JSON.stringify({ ids }),
+  });
+}
+export function updateWord(id: number, data: { word?: string; definition?: string }) {
+  return apiFetch<{ ok: boolean }>(`/words/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
 export function uploadWord(unitId: number, file: File, word?: string) {
   const fd = new FormData();
   fd.append("unitId", String(unitId));

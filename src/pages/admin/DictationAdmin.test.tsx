@@ -14,6 +14,8 @@ vi.mock("../../api/admin", () => ({
   deleteUnit: vi.fn(),
   deleteWord: vi.fn(),
   uploadWord: vi.fn(),
+  reorderUnits: vi.fn(),
+  updateWord: vi.fn(),
 }));
 vi.mock("../../api/listen", () => ({ listUnits: mocks.listUnits, listWords: mocks.listWords }));
 
