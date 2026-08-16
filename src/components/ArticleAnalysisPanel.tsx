@@ -27,8 +27,8 @@ export function ArticleAnalysisPanel({ analysis }: ArticleAnalysisPanelProps) {
                         <strong className="analysis-word__text">{expression.text}</strong>
                         <span className="analysis-word__meaning">{expression.meaning}</span>
                       </div>
-                      {usage && <p className="analysis-word__usage">{usage}</p>}
-                      {example && <p className="analysis-word__example">{example}</p>}
+                      {usage && <div className="analysis-word__usage">{usage}</div>}
+                      {example && <div className="analysis-word__example">{example}</div>}
                     </div>
                   );
                 })}

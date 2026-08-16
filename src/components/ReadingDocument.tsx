@@ -46,8 +46,8 @@ function renderAnalysis(container: HTMLElement, analysis: ParagraphAnalysis | nu
       main.appendChild(textNode("span", expression.meaning, "analysis-word__meaning"));
       item.appendChild(main);
       const { usage, example } = splitUsage(expression.usage);
-      if (usage) item.appendChild(textNode("p", usage, "analysis-word__usage"));
-      if (example) item.appendChild(textNode("p", example, "analysis-word__example"));
+      if (usage) item.appendChild(textNode("div", usage, "analysis-word__usage"));
+      if (example) item.appendChild(textNode("div", example, "analysis-word__example"));
       list.appendChild(item);
     }
     vocabulary.appendChild(list);
