@@ -27,7 +27,7 @@ function array(value: unknown, label: string): unknown[] {
 
 function validateExpression(value: unknown, label: string): ExpressionItem {
   const v = object(value, label);
-  return { text: string(v.text, `${label}.text`), meaning: string(v.meaning, `${label}.meaning`), usage: string(v.usage, `${label}.usage`) };
+  return { text: string(v.text, `${label}.text`), meaning: string(v.meaning, `${label}.meaning`), usage: string(v.usage, `${label}.usage`), ...(v.example === undefined ? {} : { example: string(v.example, `${label}.example`) }) };
 }
 
 export function validateArticleAnalysis(value: unknown, paragraphs: string[]): ArticleAnalysis {
@@ -44,7 +44,7 @@ export function validateArticleAnalysis(value: unknown, paragraphs: string[]): A
   return { version: 1, paragraphs: parsed };
 }
 
-export const SYSTEM_PROMPT = `You are an English reading analyst. Return only valid JSON matching this shape: {"version":1,"paragraphs":[{"index":0,"original":"exact paragraph text","translation":"Chinese translation","expressions":[{"text":"expression (chunk)","meaning":"Chinese meaning","usage":"English explanation and usage"}]}]}. Preserve every paragraph original exactly.
+export const SYSTEM_PROMPT = `You are an English reading analyst. Return only valid JSON matching this shape: {"version":1,"paragraphs":[{"index":0,"original":"exact paragraph text","translation":"Chinese translation","expressions":[{"text":"expression (chunk)","meaning":"Chinese meaning","usage":"English explanation of usage, WITHOUT any example sentence","example":"one short English example sentence, optional"}]}]}. Preserve every paragraph original exactly.
 
 For "expressions", select the MOST WORTHWHILE English expressions to remember and reuse from each paragraph (collocations, phrasal verbs, fixed phrases, and other chunks). Every selected item must satisfy ALL of these criteria:
 - High-frequency, natural, and reusable in everyday or formal contexts;
@@ -53,7 +53,9 @@ For "expressions", select the MOST WORTHWHILE English expressions to remember an
 - Worth memorizing as a single chunk;
 - Transferable to other articles and situations;
 - Never select proper nouns, low-frequency words, or expressions unique to this article;
-- Quality over quantity: fewer good items are better; return an empty array when a paragraph yields nothing worth memorizing.`;
+- Quality over quantity: fewer good items are better; return an empty array when a paragraph yields nothing worth memorizing.
+
+Field rules: "meaning" is a concise Chinese gloss. "usage" is a brief English explanation of how the expression is used; do NOT embed example sentences or labels like "Example:" / "e.g." in it. "example" is an optional single English sentence demonstrating the expression in context (plain sentence only, no "Example:" prefix). Omit "example" when you cannot produce a natural one.`;
 
 export async function generateArticleAnalysis(config: AiModelRuntimeConfig, title: string, content: string, timeoutMs = 300_000): Promise<ArticleAnalysis> {
   const paragraphs = splitParagraphs(content);

@@ -34,7 +34,7 @@ describe("ReadingDocument", () => {
     render(<ReadingDocument paragraphs={paragraphs} annotations={[]} onSelectionChange={vi.fn()} />);
     expect(document.querySelector(".analysis-word__text")?.textContent).toBe("Learn by doing");
     expect(document.querySelector(".analysis-word__meaning")?.textContent).toBe("在做中学");
-    expect(document.querySelector(".analysis-word__usage")?.textContent).toBe("proverb-like advice");
+    expect(document.querySelector(".analysis-word__usage")?.textContent).toBe("Usage: proverb-like advice");
   });
 
   it("places the paragraph analysis directly below its paragraph", () => {

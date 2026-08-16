@@ -84,7 +84,7 @@ function validParagraph(index: number, original: string, translation = "译") {
     index,
     original,
     translation,
-    expressions: [{ text: "word", meaning: "意思", usage: "用法" }],
+    expressions: [{ text: "word", meaning: "意思", usage: "用法", example: "an example" }],
   };
 }
 
@@ -104,6 +104,14 @@ describe("validateArticleAnalysis", () => {
     expect(out.paragraphs).toHaveLength(2);
     expect(out.paragraphs[0].index).toBe(0);
     expect(out.paragraphs[1].expressions[0].text).toBe("word");
+    expect(out.paragraphs[0].expressions[0].example).toBe("an example");
+  });
+
+  it("accepts expressions without the optional example field", () => {
+    const bare = JSON.parse(JSON.stringify(validAnalysis));
+    delete bare.paragraphs[0].expressions[0].example;
+    const out = validateArticleAnalysis(bare, ["Para A", "Para B"]);
+    expect(out.paragraphs[0].expressions[0].example).toBeUndefined();
   });
 
   it("rejects wrong version", () => {

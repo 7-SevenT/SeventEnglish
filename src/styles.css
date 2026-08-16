@@ -225,6 +225,7 @@ button { font-family: inherit; }
 .analysis-word__meaning { color: #1a1a1a; font-size: 13px; }
 .analysis-word__usage { padding-left: 18px; color: #555; font-size: 13px; line-height: 1.6; }
 .analysis-word__example { padding-left: 18px; color: #777; font-size: 12.5px; line-height: 1.6; }
+.analysis-word__label { font-weight: 700; margin-right: 4px; }
 .analysis-translation { margin: 0; line-height: 1.7; color: #555; }
 .article-notes { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); position: sticky; top: 76px; min-height: 120px; }
 .article-notes .section-title { margin: 0 0 var(--space-3); }

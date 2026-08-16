@@ -23,8 +23,10 @@ export interface ExpressionItem {
   text: string;
   /** 中文意思 */
   meaning: string;
-  /** 英语解释 / 用法说明 */
+  /** 英语解释 / 用法说明（不含例句） */
   usage: string;
+  /** 英语例句（可选，由 AI 结构化输出） */
+  example?: string;
 }
 
 export interface Article {

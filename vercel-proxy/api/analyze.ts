@@ -54,7 +54,7 @@ function array(value, label) {
 
 function validateExpression(value, label) {
   const v = object(value, label);
-  return { text: string(v.text, `${label}.text`), meaning: string(v.meaning, `${label}.meaning`), usage: string(v.usage, `${label}.usage`) };
+  return { text: string(v.text, `${label}.text`), meaning: string(v.meaning, `${label}.meaning`), usage: string(v.usage, `${label}.usage`), ...(v.example === undefined ? {} : { example: string(v.example, `${label}.example`) }) };
 }
 
 function validateArticleAnalysis(value, paragraphs) {
@@ -74,7 +74,7 @@ function validateArticleAnalysis(value, paragraphs) {
 // 分块版提示词：要求 AI 只分析列出的段落（带全局 0-based index）。
 // 多块并行可显著降低单次请求耗时，从而避开 Vercel Hobby 300s 上限、
 // Cloudflare 边缘代理 100s 无响应 524、以及本地网络 ~180s 长连接断开三类限制。
-const SYSTEM_PROMPT = `You are an English reading analyst. Analyze ONLY the article paragraphs listed below (each labeled with its global 0-based index into the full article). Return only valid JSON matching this shape: {"version":1,"paragraphs":[{"index":0,"original":"exact paragraph text","translation":"Chinese translation","expressions":[{"text":"expression (chunk)","meaning":"Chinese meaning","usage":"English explanation and usage"}]}]}. Preserve every paragraph original exactly.
+const SYSTEM_PROMPT = `You are an English reading analyst. Analyze ONLY the article paragraphs listed below (each labeled with its global 0-based index into the full article). Return only valid JSON matching this shape: {"version":1,"paragraphs":[{"index":0,"original":"exact paragraph text","translation":"Chinese translation","expressions":[{"text":"expression (chunk)","meaning":"Chinese meaning","usage":"English explanation of usage, WITHOUT any example sentence","example":"one short English example sentence, optional"}]}]}. Preserve every paragraph original exactly.
 
 For "expressions", select the MOST WORTHWHILE English expressions to remember and reuse from each paragraph (collocations, phrasal verbs, fixed phrases, and other chunks). Every selected item must satisfy ALL of these criteria:
 - High-frequency, natural, and reusable in everyday or formal contexts;
@@ -83,7 +83,9 @@ For "expressions", select the MOST WORTHWHILE English expressions to remember an
 - Worth memorizing as a single chunk;
 - Transferable to other articles and situations;
 - Never select proper nouns, low-frequency words, or expressions unique to this article;
-- Quality over quantity: fewer good items are better; return an empty array when a paragraph yields nothing worth memorizing.`;
+- Quality over quantity: fewer good items are better; return an empty array when a paragraph yields nothing worth memorizing.
+
+Field rules: "meaning" is a concise Chinese gloss. "usage" is a brief English explanation of how the expression is used; do NOT embed example sentences or labels like "Example:" / "e.g." in it. "example" is an optional single English sentence demonstrating the expression in context (plain sentence only, no "Example:" prefix). Omit "example" when you cannot produce a natural one.`;
 
 // 每块最多段落数：实测 2 段/块在 siliconflow 上约 18-45s（偶发 90s+），
 // 16 段文章 8 块并行总耗时约 95s，压线但可接受；块更小可进一步降低总耗时。
