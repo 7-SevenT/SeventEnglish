@@ -5,8 +5,24 @@ import { filterRenderableAnnotations } from "./annotations";
 export type TextMark = { type: "aiHighlight" | "annotation"; attrs?: Record<string, string | number> };
 type Interval = { start: number; end: number; marks: TextMark[] };
 
-function escapedRegex(text: string): RegExp {
-  return new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// 在段落原文中查找表达式位置。优先精确匹配（大小写不敏感、折叠空白）；
+// 失败时对纯字母数字词块做"词序列容错匹配"（容忍词间少量标点/空格，如
+// "souped up" 匹配 "souped-up"、"take off" 匹配 "take, off"），
+// 覆盖 AI 词块与原文存在细微差异时漏加粗的情况。
+function findExpressionMatch(text: string, needle: string): { start: number; end: number } | null {
+  const exact = new RegExp(escapeRegExp(needle).replace(/\s+/g, "\\s+"), "i").exec(text);
+  if (exact) return { start: exact.index, end: exact.index + exact[0].length };
+  const words = needle.split(/\s+/).filter(Boolean);
+  if (words.length >= 2 && words.every((word) => /^[\w'-]+$/.test(word))) {
+    const pattern = `\\b${words.map(escapeRegExp).join("[\\s\\S]{0,3}?")}\\b`;
+    const match = new RegExp(pattern, "i").exec(text);
+    if (match) return { start: match.index, end: match.index + match[0].length };
+  }
+  return null;
 }
 
 function aiIntervals(text: string, paragraph: ParagraphAnalysis): Interval[] {
@@ -15,15 +31,16 @@ function aiIntervals(text: string, paragraph: ParagraphAnalysis): Interval[] {
   for (const expression of expressions) {
     const needle = expression.text.trim();
     if (!needle) continue;
-    const pattern = escapedRegex(needle);
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(text))) {
-      const start = match.index;
-      const end = start + match[0].length;
+    let searchFrom = 0;
+    while (searchFrom < text.length) {
+      const found = findExpressionMatch(text.slice(searchFrom), needle);
+      if (!found) break;
+      const start = searchFrom + found.start;
+      const end = searchFrom + found.end;
       if (!matches.some((item) => start < item.end && end > item.start)) {
         matches.push({ start, end, marks: [{ type: "aiHighlight" }] });
       }
-      if (match[0].length === 0) pattern.lastIndex++;
+      searchFrom = end > start ? end : start + 1;
     }
   }
   return matches;

@@ -29,6 +29,29 @@ describe("buildArticleDoc", () => {
     expect(doc.content?.[0].content?.[0].marks).toEqual([{ type: "aiHighlight" }]);
   });
 
+  it("highlights expressions via fuzzy word-sequence match (hyphen vs space)", () => {
+    const p: ParagraphAnalysis = { ...paragraph, original: "His methods were soon souped-up.", expressions: [{ text: "souped up", meaning: "改进", usage: "v" }] };
+    const doc = buildArticleDoc([p], []);
+    const segments = doc.content?.[0].content ?? [];
+    const marks = segments.flatMap((s) => ("marks" in s && s.marks ? s.marks : []));
+    expect(marks).toContainEqual({ type: "aiHighlight" });
+    expect(segments.find((s) => "text" in s && (s.text as string).includes("souped-up"))).toBeTruthy();
+  });
+
+  it("highlights expressions tolerating punctuation between words", () => {
+    const p: ParagraphAnalysis = { ...paragraph, original: "Please take, off your coat.", expressions: [{ text: "take off", meaning: "脱下", usage: "v" }] };
+    const doc = buildArticleDoc([p], []);
+    const marks = (doc.content?.[0].content ?? []).flatMap((s) => ("marks" in s && s.marks ? s.marks : []));
+    expect(marks).toContainEqual({ type: "aiHighlight" });
+  });
+
+  it("skips expressions that cannot be found in the paragraph", () => {
+    const p: ParagraphAnalysis = { ...paragraph, original: "A quiet day.", expressions: [{ text: "loud crowd", meaning: "喧闹人群", usage: "n" }] };
+    const doc = buildArticleDoc([p], []);
+    const marks = (doc.content?.[0].content ?? []).flatMap((s) => ("marks" in s && s.marks ? s.marks : []));
+    expect(marks).toEqual([]);
+  });
+
   it("adds annotation and AI marks without replacing either", () => {
     const doc = buildArticleDoc([paragraph], [annotation]);
     const marks = doc.content?.[0].content?.[0].marks ?? [];
