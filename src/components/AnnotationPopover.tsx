@@ -26,10 +26,18 @@ export function AnnotationPopover({ annotation, onEdit, onDelete, onClose }: Ann
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
 
   // 以正文中该标记（mark[data-annotation-id]）的实际位置为锚点弹出，替代固定在屏幕中央。
+  // 滚动/缩放时重新计算位置，保证弹窗始终跟随标记。
   useEffect(() => {
     const el = document.querySelector(`mark[data-annotation-id="${annotation.id}"]`);
     if (!(el instanceof HTMLElement)) return;
-    setPosition(computePosition(el.getBoundingClientRect()));
+    const update = () => setPosition(computePosition(el.getBoundingClientRect()));
+    update();
+    document.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      document.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
   }, [annotation.id]);
 
   function save() {
