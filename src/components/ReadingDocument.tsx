@@ -4,6 +4,7 @@ import { Node as TiptapNode } from "@tiptap/core";
 import type { Annotation, ParagraphAnalysis } from "../../worker/src/db";
 import { AnnotationMark, AiHighlightMark } from "./AnnotationMark";
 import { buildArticleDoc } from "../lib/articleDocument";
+import { splitUsage } from "../lib/expressionText";
 
 function textNode(tag: string, text: string, className?: string): HTMLElement {
   const element = document.createElement(tag);
@@ -39,12 +40,14 @@ function renderAnalysis(container: HTMLElement, analysis: ParagraphAnalysis | nu
     for (const expression of analysis.expressions) {
       const item = document.createElement("div");
       item.className = "analysis-word";
-      item.appendChild(textNode("strong", expression.text, "analysis-word__text"));
-      const definition = document.createElement("span");
-      definition.className = "analysis-word__definition";
-      definition.appendChild(document.createTextNode(expression.meaning));
-      if (expression.usage) definition.appendChild(textNode("em", ` | ${expression.usage}`));
-      item.appendChild(definition);
+      const main = document.createElement("div");
+      main.className = "analysis-word__main";
+      main.appendChild(textNode("strong", expression.text, "analysis-word__text"));
+      main.appendChild(textNode("span", expression.meaning, "analysis-word__meaning"));
+      item.appendChild(main);
+      const { usage, example } = splitUsage(expression.usage);
+      if (usage) item.appendChild(textNode("p", usage, "analysis-word__usage"));
+      if (example) item.appendChild(textNode("p", example, "analysis-word__example"));
       list.appendChild(item);
     }
     vocabulary.appendChild(list);

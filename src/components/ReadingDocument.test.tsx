@@ -33,8 +33,8 @@ describe("ReadingDocument", () => {
   it("renders the expression list with meaning and usage below the paragraph", () => {
     render(<ReadingDocument paragraphs={paragraphs} annotations={[]} onSelectionChange={vi.fn()} />);
     expect(document.querySelector(".analysis-word__text")?.textContent).toBe("Learn by doing");
-    expect(document.querySelector(".analysis-word__definition")?.textContent).toContain("在做中学");
-    expect(document.querySelector(".analysis-word__definition")?.textContent).toContain("在做中学 | proverb-like advice");
+    expect(document.querySelector(".analysis-word__meaning")?.textContent).toBe("在做中学");
+    expect(document.querySelector(".analysis-word__usage")?.textContent).toBe("proverb-like advice");
   });
 
   it("places the paragraph analysis directly below its paragraph", () => {

@@ -220,9 +220,11 @@ button { font-family: inherit; }
 .analysis-section h4 { margin: 0 0 6px; color: #8a6d1a; font-size: 12px; line-height: 1.4; letter-spacing: 1px; font-weight: 700; }
 .analysis-highlight-list { display: grid; gap: 8px; }
 .analysis-word { min-width: 0; color: #1a1a1a; padding: 2px 0; }
-.analysis-word__text { display: block; color: #8e0b20; font-size: 14px; line-height: 1.5; }
-.analysis-word__definition { display: block; margin-left: 18px; font-size: 13px; line-height: 1.6; color: #555; }
-.analysis-word__definition em { color: #777; font-size: 12.5px; }
+.analysis-word__main { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.analysis-word__text { color: #8e0b20; font-size: 14px; }
+.analysis-word__meaning { color: #1a1a1a; font-size: 13px; }
+.analysis-word__usage { margin: 1px 0 0 18px; color: #555; font-size: 13px; line-height: 1.6; }
+.analysis-word__example { margin: 1px 0 0 18px; color: #777; font-size: 12.5px; line-height: 1.6; }
 .analysis-translation { margin: 0; line-height: 1.7; color: #555; }
 .article-notes { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); position: sticky; top: 76px; min-height: 120px; }
 .article-notes .section-title { margin: 0 0 var(--space-3); }
