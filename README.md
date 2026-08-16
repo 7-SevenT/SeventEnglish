@@ -24,17 +24,22 @@
 ```bash
 npm install
 npm run dev        # wrangler dev，本地调试前后端（127.0.0.1:8788）
-npm test           # vitest 全量测试（含 vercel-proxy/tests/）
+npm test           # vitest 全量测试（scripts/test.mjs 包装，见下方说明）
 npx vitest run vercel-proxy/tests/analyze.test.ts   # 单独跑 Vercel 代理测试
 npx tsc --noEmit   # TypeScript 类型检查
 npm run build      # 生产构建
 ```
 
+> **`npm test` 说明**：测试本体（34 文件 / 230+ 用例）全部通过，但 vite 8.x + vitest 4 存在上游 bug——
+> 偶发出现"测试结果已全部输出但进程不退出"（dev server close() 挂起）。`npm test` 经 `scripts/test.mjs`
+> 包装：挂起超过 120s 自动强制退出（测试失败时仍返回非 0 退出码），避免 CI/本地卡死。
+
 ## 数据层
 
-- 数据库表结构：`db/schema.sql`（articles / word_books / units / words / settings / annotations / article_notes）。
+- 数据库表结构：`db/schema.sql`（articles / word_books / units / words / settings / annotations / article_notes；units→word_books、words→units 均带 `ON DELETE CASCADE`，删除 API 仍显式先删子表以兼容已有库并顺带清理 R2 音频）。
 - 阅读标注数据：annotation 使用 ProseMirror `from_position/to_position`；从旧版 `start_offset/end_offset` 升级时会清空旧荧光标记和评论，不迁移文章与笔记。
 - 数据访问层：`worker/src/db.ts`（`applySchema` + 查询函数，`defaultSchema` 已内嵌 schema 原文）。
+- 建表/迁移只执行一次：`applySchema` 通过 settings 表的 `schema_version` 标记判断，首次访问自动建表+迁移后写入标记，后续请求直接跳过（避免每个请求重复执行 DDL）。
 - 测试：`npm test` 全量运行；数据层单测 `npx vitest run worker/src/db.test.ts`（mock D1）。
 
 ## 部署
@@ -62,7 +67,7 @@ npx wrangler d1 execute <database_name> --file=./db/schema.sql --remote
 
 > **本地/部署绑定说明**：`wrangler.toml` 已启用 D1(`DB`)、R2(`BUCKET`) 与队列(`ANALYSIS_QUEUE` → `article-analysis`) 绑定并回填生产资源（D1 `sevent-english-db`、R2 `sevent-english-assets`、队列 `article-analysis`，均已在云端创建）。本地 dev 时 wrangler 会在 `.wrangler/state` 维护本地 sqlite / Miniflare 对象存储，无需真实云端资源即可本地跑通数据流。生产环境变量/密钥（`LOGIN` / `ENCRYPTION_KEY`）不写入配置文件，通过 `npx wrangler secret put <KEY> --name sevent-english` 单独配置。
 
-**兜底机制**：`GET /api/health`（公开探活端点）会在每次被调用时执行幂等的 `applySchema`（`CREATE TABLE IF NOT EXISTS`），可作为建表兜底。部署后调用一次 `health` 即自动建表；显式 `d1 execute` 与 health 兜底二者不冲突，可都保留。
+**兜底机制**：`GET /api/health`（公开探活端点）会执行幂等的 `applySchema`（`CREATE TABLE IF NOT EXISTS` + 迁移 + 写入 `schema_version` 标记），可作为建表兜底。部署后调用一次 `health` 即自动建表；显式 `d1 execute` 与 health 兜底二者不冲突，可都保留。
 
 本地开发也可用等价方式初始化 D1：
 
@@ -72,7 +77,7 @@ npx wrangler d1 execute <database_name> --file=./db/schema.sql
 
 详见 [设计文档](docs/superpowers/specs/2026-08-09-seventenglish-design.md)。阅读页面与 AI 雅思分析方案见 [阅读分析设计](docs/superpowers/specs/2026-02-14-reading-analysis-design.md)，实施步骤见 [阅读分析实施计划](docs/superpowers/plans/2026-02-14-reading-analysis.md)。段落分析总折叠块设计见 [设计文档](docs/superpowers/specs/2026-08-21-reading-analysis-disclosure-design.md)，实施计划见 [实施计划](docs/superpowers/plans/2026-08-21-reading-analysis-disclosure.md)。数据库分析基础测试位于 `worker/src/db.test.ts`。AI 分析客户端测试位于 `worker/src/articleAnalysis.test.ts`。文章分析接口测试位于 `worker/src/articles-api.test.ts`。段落阅读组件测试位于 `src/components/ArticleParagraph.test.tsx`。文章任意文本标记与评论通过 `ReadingDocument` 的 Tiptap/ProseMirror Mark 保存。文章笔记由 `ArticleNotes` 防抖自动保存。阅读页 UI 参考 ecoSite 的暖米色、深红和衬线卡片风格；重点词/短语在正文中仅使用黑体加粗，每段原文下面紧跟该段词汇、段落翻译与写作句型折叠解析；跨段落划词后会出现受视口边界约束的荧光/评论工具栏，评论以独立弹层展示，删除标记使用带遮罩的现代确认对话框。划词本身不会保存荧光，只有点击工具栏后才会创建标记。
 
-管理后台全链路重构设计见 [管理工作台设计](docs/superpowers/specs/2026-08-12-admin-workbench-design.md)，包含文章、听写、AI模型三个工作台模块及加密 AI 配置方案。导航模式重构见 [导航栏设计](docs/superpowers/specs/2026-08-12-admin-navigation-design.md)，区分学习模式与管理模式。
+管理后台全链路重构设计见 [管理工作台设计](docs/superpowers/specs/2026-08-12-admin-workbench-design.md)，包含文章、听写、AI模型三个工作台模块及加密 AI 配置方案。导航模式重构见 [导航栏设计](docs/superpowers/specs/2026-08-12-admin-navigation-design.md)，区分学习模式与管理模式。编辑文章正文后会自动重置 AI 分析状态并重新入队（仅改标题/日期不触发，避免浪费额度）；删除单词书/单元/词条时先删子表再删父表（D1 外键安全）并顺带清理 R2 音频对象。
 
 ### AI 配置
 

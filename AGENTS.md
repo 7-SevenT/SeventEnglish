@@ -23,7 +23,7 @@ docs/superpowers/   设计文档（specs）与实施计划（plans）
 ## 常用命令
 
 ```bash
-npm test                # vitest 全量测试
+npm test                # vitest 全量测试（scripts/test.mjs 包装：上游 close() 挂起时 120s 强制退出）
 npx vitest run <path>   # 单文件测试
 npx tsc --noEmit        # TypeScript 类型检查（strict）
 npm run build           # 生产构建
@@ -36,7 +36,8 @@ npm run deploy          # node scripts/deploy.mjs：build → 移除并重建 qu
 - 数据 API 一律挂 `requireAuth` 中间件（`worker/src/auth.ts`），白名单仅 /api/login、/api/logout、/api/me、/api/health。
 - 认证为无状态签名 cookie：会话签名密钥由 `ENCRYPTION_KEY` 经 HKDF-SHA256 派生（域分离），密码比对先 SHA-256 定长化再常数时间比较。
 - AI API Key 与 WebDAV 密码用 `ENCRYPTION_KEY` 做 AES-GCM 加密后存入 D1，绝不返回明文。
-- 数据库迁移写进 `applySchema`（幂等），新表/新列在此补充，不手工改线上库。
+- 数据库迁移写进 `applySchema`（幂等，settings 表 `schema_version` 标记一次性执行），新表/新列在此补充并递增 `SCHEMA_VERSION`，不手工改线上库。
+- 删除有子表的数据（单词书/单元/词条）时先删子表再删父表（D1 默认强制外键，顺序错误会 FOREIGN KEY constraint failed），并顺带清理对应 R2 音频对象。
 - 所有 id 参数、multipart 文件名做校验/净化，动态 SQL 字段用白名单。
 - **长任务（如 AI 文章分析）必须走队列**（`ANALYSIS_QUEUE` producer + consumer），禁止用 `waitUntil` 跑长任务——平台限制 waitUntil 在响应后最多再跑 30 秒，超时被硬终止且不触发 catch，状态会永久卡死。队列消息体 `AnalyzeJob` 定义在 `worker/src/db.ts`，consumer 入口在 `worker/src/index.ts` 的 `queue` handler，核心逻辑 `handleAnalyzeJob` 导出以便单测。
 - **AI 分析经 Vercel 代理执行**：Workers 免费计划 CPU 限制 10ms/请求，直接跑 AI 分析会被 exceededCpu 终止（详见 `vercel-proxy/README.md`）。`handleAnalyzeJob` 只负责把任务转发到 Vercel `/api/analyze`（服务地址与 token 在管理后台「设置 → AI 分析服务」配置，token 加密存 D1）并入库。`vercel-proxy/api/analyze.ts` 的解析/校验逻辑与 `worker/src/articleAnalysis.ts` 保持同步，修改时两处需一起改。
