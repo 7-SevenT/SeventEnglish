@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import { useSpeechSynthesis, isSpeechSynthesisSupported, DEFAULT_RATE } from "./useSpeechSynthesis";
+import { useSpeechSynthesis, isSpeechSynthesisSupported, pickEnglishVoice, DEFAULT_RATE } from "./useSpeechSynthesis";
 
 type SpeechListener = (() => void) | null;
 
@@ -25,6 +25,7 @@ function makeSpeechMock(voices: Array<{ voiceURI: string; lang: string; name: st
 class MockUtterance {
   text: string;
   voice: SpeechSynthesisVoice | null = null;
+  lang = "";
   rate = 1;
   onend: (() => void) | null = null;
   onerror: (() => void) | null = null;
@@ -140,5 +141,58 @@ describe("useSpeechSynthesis", () => {
     });
     expect(synthesis.cancel).toHaveBeenCalledTimes(1);
     expect(result.current.speaking).toBe(false);
+  });
+
+  it("speak() falls back to lang=en-US when no English voice exists (avoids Chinese reading)", () => {
+    // 系统无任何英文语音：恢复逻辑不会设置 voice，speak 必须显式兜底英文，否则落回默认（中文）语音
+    const { synthesis } = stubSpeech([]);
+    const { result } = renderHook(() => useSpeechSynthesis());
+    expect(result.current.voice).toBeNull();
+    act(() => {
+      result.current.speak("3:00 pm");
+    });
+    const utterance = synthesis.speak.mock.calls[0][0] as MockUtterance;
+    expect(utterance.voice).toBeNull();
+    expect(utterance.lang).toBe("en-US");
+  });
+
+  it("speak() picks an English voice on the fly when the voice list had not loaded yet", () => {
+    // 语音列表异步加载（初始为空，恢复逻辑未选中任何语音），speak 时实时兜底选中英文语音
+    const voices: Array<{ voiceURI: string; lang: string; name: string }> = [];
+    const { synthesis } = stubSpeech(voices);
+    const { result } = renderHook(() => useSpeechSynthesis());
+    expect(result.current.voices).toEqual([]);
+    act(() => {
+      voices.push({ voiceURI: "us", lang: "en-US", name: "David" });
+      result.current.speak("take off");
+    });
+    const utterance = synthesis.speak.mock.calls[0][0] as MockUtterance;
+    expect(utterance.voice?.voiceURI).toBe("us");
+    expect(result.current.voice?.voiceURI).toBe("us");
+  });
+
+  it("speak() pre-processes digits into English words before reading", () => {
+    const { synthesis } = stubSpeech([{ voiceURI: "us", lang: "en-US", name: "David" }]);
+    const { result } = renderHook(() => useSpeechSynthesis());
+    act(() => {
+      result.current.speak("3:30 pm");
+    });
+    const utterance = synthesis.speak.mock.calls[0][0] as MockUtterance;
+    expect(utterance.text).toBe("three thirty pm");
+  });
+});
+
+describe("pickEnglishVoice", () => {
+  const v = (voiceURI: string, lang: string) => ({ voiceURI, lang, name: voiceURI }) as SpeechSynthesisVoice;
+
+  it("prefers en-US, then en-GB, then any other en", () => {
+    expect(pickEnglishVoice([v("fr", "fr-FR"), v("uk", "en-GB"), v("us", "en-US")])?.voiceURI).toBe("us");
+    expect(pickEnglishVoice([v("fr", "fr-FR"), v("uk", "en-GB")])?.voiceURI).toBe("uk");
+    expect(pickEnglishVoice([v("au", "en-AU")])?.voiceURI).toBe("au");
+  });
+
+  it("returns null when no English voice is available", () => {
+    expect(pickEnglishVoice([v("cn", "zh-CN"), v("fr", "fr-FR")])).toBeNull();
+    expect(pickEnglishVoice([])).toBeNull();
   });
 });

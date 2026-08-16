@@ -8,7 +8,8 @@ import { AdminHeader } from "../../components/admin/AdminHeader";
 import { AdminToast, type ToastTone } from "../../components/admin/AdminToast";
 import { DictationImportDrawer } from "../../components/admin/DictationImportDrawer";
 import { EmptyState } from "../../components/admin/EmptyState";
-import { isSpeechSynthesisSupported } from "../../hooks/useSpeechSynthesis";
+import { isSpeechSynthesisSupported, pickEnglishVoice } from "../../hooks/useSpeechSynthesis";
+import { toEnglishSpokenText } from "../../lib/englishSpoken";
 
 export function DictationAdmin() {
   const [books, setBooks] = useState<WordBookOverview[]>([]);
@@ -119,7 +120,11 @@ export function DictationAdmin() {
       return;
     }
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(word);
+    // 朗读文本先做数字→英文单词预处理（与听写页一致），避免数字被中文朗读
+    const utterance = new SpeechSynthesisUtterance(toEnglishSpokenText(word));
+    const voice = pickEnglishVoice(window.speechSynthesis.getVoices());
+    if (voice) utterance.voice = voice;
+    // 找不到英文语音时至少显式指定英文，避免落回默认（中文）语音朗读
     utterance.lang = "en-US";
     window.speechSynthesis.speak(utterance);
   }

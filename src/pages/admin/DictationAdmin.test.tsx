@@ -19,10 +19,10 @@ vi.mock("../../api/listen", () => ({ listUnits: mocks.listUnits, listWords: mock
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
-function stubSpeech() {
+function stubSpeech(voices: Array<{ voiceURI: string; lang: string }> = []) {
   const speak = vi.fn();
   const cancel = vi.fn();
-  vi.stubGlobal("speechSynthesis", { speak, cancel });
+  vi.stubGlobal("speechSynthesis", { speak, cancel, getVoices: () => voices });
   vi.stubGlobal("SpeechSynthesisUtterance", class { text: string; lang = ""; constructor(t: string) { this.text = t; } });
   return { speak, cancel };
 }

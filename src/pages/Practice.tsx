@@ -355,8 +355,8 @@ export function Practice() {
                   <select className="input" value={tts.voice?.voiceURI ?? ""} onChange={(event) => {
                     const v = tts.voices.find((x) => x.voiceURI === event.target.value);
                     if (v) tts.setVoice(v);
-                  }}>
-                    {tts.voices.length === 0 && <option value="">默认语音</option>}
+                  }} disabled={tts.voices.length === 0}>
+                    {tts.voices.length === 0 && <option value="">未检测到英文语音，将自动尝试英文朗读</option>}
                     {tts.voices.map((v) => (
                       <option key={v.voiceURI} value={v.voiceURI}>{v.name}（{v.lang}）</option>
                     ))}
