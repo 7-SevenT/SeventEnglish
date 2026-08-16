@@ -111,7 +111,7 @@ export function ArticleDetail() {
     return <div className="container container--read"><p className="empty">加载中…</p></div>;
 
   const originalParagraphs = splitParagraphs(article.content);
-  const paragraphs = article.analysis_json?.paragraphs ?? originalParagraphs.map((original, index) => ({ index, original, translation: "", highlights: [], writing_sentences: [] }));
+  const paragraphs = article.analysis_json?.paragraphs ?? originalParagraphs.map((original, index) => ({ index, original, translation: "", expressions: [] }));
   const hasAnalysis = article.analysis_status === "completed" && Boolean(article.analysis_json?.paragraphs.length);
   const activeAnnotation = annotationState.annotations.find((item) => item.id === activeAnnotationId) ?? null;
 

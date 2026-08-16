@@ -1,5 +1,5 @@
 import type { AiModelRuntimeConfig } from "./aiConfig";
-import type { ArticleAnalysis, HighlightItem, ParagraphAnalysis, WritingSentence } from "./db";
+import type { ArticleAnalysis, ExpressionItem, ParagraphAnalysis } from "./db";
 
 export function splitParagraphs(content: string): string[] {
   return content.split(/\n\s*\n+/).map((p) => p.trim()).filter(Boolean);
@@ -25,19 +25,9 @@ function array(value: unknown, label: string): unknown[] {
   return value;
 }
 
-function validateWriting(value: unknown, label: string): WritingSentence {
+function validateExpression(value: unknown, label: string): ExpressionItem {
   const v = object(value, label);
-  const tags = v.tags === undefined ? undefined : array(v.tags, `${label}.tags`).map((x, i) => string(x, `${label}.tags[${i}]`));
-  return { text: string(v.text, `${label}.text`), translation: string(v.translation, `${label}.translation`), usage: string(v.usage, `${label}.usage`), ...(tags ? { tags } : {}) };
-}
-
-function validateHighlight(value: unknown, label: string): HighlightItem {
-  const v = object(value, label);
-  const type = string(v.type, `${label}.type`);
-  if (type !== "word" && type !== "phrase") throw new Error(`${label}.type is invalid`);
-  const category = v.ielts_category === undefined ? undefined : string(v.ielts_category, `${label}.ielts_category`);
-  if (category && !["reading", "writing", "speaking", "general"].includes(category)) throw new Error(`${label}.ielts_category is invalid`);
-  return { text: string(v.text, `${label}.text`), type, meaning: string(v.meaning, `${label}.meaning`), usage: string(v.usage, `${label}.usage`), ...(v.example === undefined ? {} : { example: string(v.example, `${label}.example`) }), ...(category ? { ielts_category: category } : {}) } as HighlightItem;
+  return { text: string(v.text, `${label}.text`), meaning: string(v.meaning, `${label}.meaning`), usage: string(v.usage, `${label}.usage`) };
 }
 
 export function validateArticleAnalysis(value: unknown, paragraphs: string[]): ArticleAnalysis {
@@ -49,12 +39,21 @@ export function validateArticleAnalysis(value: unknown, paragraphs: string[]): A
     const p = object(raw, `paragraphs[${i}]`);
     if (p.index !== i) throw new Error(`paragraphs[${i}].index mismatch`);
     if (p.original !== paragraphs[i]) throw new Error(`paragraphs[${i}].original mismatch`);
-    return { index: i, original: paragraphs[i], translation: string(p.translation, `paragraphs[${i}].translation`), highlights: array(p.highlights, `paragraphs[${i}].highlights`).map((x, j) => validateHighlight(x, `paragraphs[${i}].highlights[${j}]`)), writing_sentences: array(p.writing_sentences, `paragraphs[${i}].writing_sentences`).map((x, j) => validateWriting(x, `paragraphs[${i}].writing_sentences[${j}]`)) };
+    return { index: i, original: paragraphs[i], translation: string(p.translation, `paragraphs[${i}].translation`), expressions: array(p.expressions, `paragraphs[${i}].expressions`).map((x, j) => validateExpression(x, `paragraphs[${i}].expressions[${j}]`)) };
   });
-  return { version: 1, ...(v.summary === undefined ? {} : { summary: string(v.summary, "analysis.summary") }), paragraphs: parsed, writing_sentences: array(v.writing_sentences, "analysis.writing_sentences").map((x, i) => validateWriting(x, `writing_sentences[${i}]`)) };
+  return { version: 1, paragraphs: parsed };
 }
 
-export const SYSTEM_PROMPT = `You are an IELTS English reading analyst. Return only valid JSON matching this shape: {"version":1,"summary":"string","paragraphs":[{"index":0,"original":"exact paragraph","translation":"Chinese translation","highlights":[{"text":"word or phrase","type":"word|phrase","meaning":"Chinese meaning","usage":"usage","example":"optional","ielts_category":"reading|writing|speaking|general"}],"writing_sentences":[{"text":"sentence","translation":"Chinese translation","usage":"IELTS usage","tags":["tag"]}]}],"writing_sentences":[]}. Preserve every paragraph original exactly. Keep highlights selective and useful; do not list ordinary words or generic explanations. For writing_sentences, select at most one sentence per paragraph and only include it when it has clearly transferable IELTS writing value (a reusable structure, contrast, concession, cause-effect, comparison, or other strong academic pattern). Never include a merely correct or ordinary sentence just to fill the field; return an empty array when no sentence is especially valuable. Apply the same strict rule to the top-level writing_sentences.`;
+export const SYSTEM_PROMPT = `You are an English reading analyst. Return only valid JSON matching this shape: {"version":1,"paragraphs":[{"index":0,"original":"exact paragraph text","translation":"Chinese translation","expressions":[{"text":"expression (chunk)","meaning":"Chinese meaning","usage":"English explanation and usage"}]}]}. Preserve every paragraph original exactly.
+
+For "expressions", select the MOST WORTHWHILE English expressions to remember and reuse from each paragraph (collocations, phrasal verbs, fixed phrases, and other chunks). Every selected item must satisfy ALL of these criteria:
+- High-frequency, natural, and reusable in everyday or formal contexts;
+- Common in quality journalism, news, and formal English;
+- Each word is familiar on its own, but the combination is not easy to understand or guess;
+- Worth memorizing as a single chunk;
+- Transferable to other articles and situations;
+- Never select proper nouns, low-frequency words, or expressions unique to this article;
+- Quality over quantity: fewer good items are better; return an empty array when a paragraph yields nothing worth memorizing.`;
 
 export async function generateArticleAnalysis(config: AiModelRuntimeConfig, title: string, content: string, timeoutMs = 300_000): Promise<ArticleAnalysis> {
   const paragraphs = splitParagraphs(content);

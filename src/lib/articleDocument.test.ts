@@ -6,8 +6,7 @@ const paragraph: ParagraphAnalysis = {
   index: 0,
   original: "Learn by doing.",
   translation: "边做边学",
-  highlights: [{ text: "Learn", type: "word", meaning: "学习", usage: "verb" }],
-  writing_sentences: [],
+  expressions: [{ text: "Learn by doing", meaning: "在做中学", usage: "proverb-like advice" }],
 };
 
 const annotation: Annotation = {

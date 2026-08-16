@@ -84,32 +84,16 @@ function validParagraph(index: number, original: string, translation = "译") {
     index,
     original,
     translation,
-    highlights: [
-      {
-        text: "word",
-        type: "word" as const,
-        meaning: "意思",
-        usage: "用法",
-        example: "an example",
-        ielts_category: "reading" as const,
-      },
-    ],
-    writing_sentences: [
-      { text: "a sentence", translation: "翻译", usage: "用途", tags: ["academic"] },
-    ],
+    expressions: [{ text: "word", meaning: "意思", usage: "用法" }],
   };
 }
 
 const validParagraphsContent = "Para A\n\nPara B";
 const validAnalysis = {
   version: 1,
-  summary: "概要",
   paragraphs: [
     validParagraph(0, "Para A"),
     validParagraph(1, "Para B"),
-  ],
-  writing_sentences: [
-    { text: "global sentence", translation: "全局句译", usage: "用途", tags: [] },
   ],
 };
 
@@ -119,7 +103,7 @@ describe("validateArticleAnalysis", () => {
     expect(out.version).toBe(1);
     expect(out.paragraphs).toHaveLength(2);
     expect(out.paragraphs[0].index).toBe(0);
-    expect(out.paragraphs[1].highlights[0].ielts_category).toBe("reading");
+    expect(out.paragraphs[1].expressions[0].text).toBe("word");
   });
 
   it("rejects wrong version", () => {
@@ -164,33 +148,22 @@ describe("validateArticleAnalysis", () => {
     ).toThrow(/index/i);
   });
 
-  it("rejects highlight with invalid type", () => {
+  it("rejects expression missing text", () => {
     const bad = JSON.parse(JSON.stringify(validAnalysis));
-    bad.paragraphs[0].highlights[0].type = "nonexistent";
-    expect(() => validateArticleAnalysis(bad, ["Para A", "Para B"])).toThrow(/type/i);
+    delete bad.paragraphs[0].expressions[0].text;
+    expect(() => validateArticleAnalysis(bad, ["Para A", "Para B"])).toThrow(/text/i);
   });
 
-  it("rejects highlight missing meaning", () => {
+  it("rejects expression missing meaning", () => {
     const bad = JSON.parse(JSON.stringify(validAnalysis));
-    delete bad.paragraphs[0].highlights[0].meaning;
+    delete bad.paragraphs[0].expressions[0].meaning;
     expect(() => validateArticleAnalysis(bad, ["Para A", "Para B"])).toThrow(/meaning/i);
   });
 
-  it("rejects writing_sentence missing translation", () => {
+  it("rejects expression missing usage", () => {
     const bad = JSON.parse(JSON.stringify(validAnalysis));
-    delete bad.paragraphs[0].writing_sentences[0].translation;
-    expect(() => validateArticleAnalysis(bad, ["Para A", "Para B"])).toThrow(/translation/i);
-  });
-
-  it("rejects top-level writing_sentences not an array", () => {
-    const bad = { ...validAnalysis, writing_sentences: "not array" };
-    expect(() => validateArticleAnalysis(bad, ["Para A", "Para B"])).toThrow(/writing_sentences/i);
-  });
-
-  it("rejects invalid ielts_category", () => {
-    const bad = JSON.parse(JSON.stringify(validAnalysis));
-    bad.paragraphs[0].highlights[0].ielts_category = "invalid";
-    expect(() => validateArticleAnalysis(bad, ["Para A", "Para B"])).toThrow(/ielts/i);
+    delete bad.paragraphs[0].expressions[0].usage;
+    expect(() => validateArticleAnalysis(bad, ["Para A", "Para B"])).toThrow(/usage/i);
   });
 
   it("rejects non-object root", () => {
@@ -199,10 +172,12 @@ describe("validateArticleAnalysis", () => {
 });
 
 describe("SYSTEM_PROMPT", () => {
-  it("requires selective, optional writing sentence analysis", () => {
-    expect(SYSTEM_PROMPT).toContain("at most one");
+  it("demands selective, transferable expressions with quality over quantity", () => {
+    expect(SYSTEM_PROMPT).toContain("High-frequency");
+    expect(SYSTEM_PROMPT).toContain("Transferable");
+    expect(SYSTEM_PROMPT).toContain("Quality over quantity");
     expect(SYSTEM_PROMPT).toContain("empty array");
-    expect(SYSTEM_PROMPT).toContain("transferable IELTS writing value");
+    expect(SYSTEM_PROMPT).not.toContain("writing_sentences");
   });
 });
 
@@ -253,10 +228,8 @@ describe("generateArticleAnalysis", () => {
 
   it("uses the supplied runtime config for chat completions", async () => {
     const body = JSON.stringify({
-      summary: "概要",
       version: 1,
       paragraphs: [validParagraph(0, "Para A"), validParagraph(1, "Para B")],
-      writing_sentences: [],
     });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockStreamResponse(body) as unknown as Response,
@@ -283,13 +256,11 @@ describe("generateArticleAnalysis", () => {
 
   it("sends request and returns validated analysis", async () => {
     const body = JSON.stringify({
-      summary: "概要",
       version: 1,
       paragraphs: [
         validParagraph(0, "Para A"),
         validParagraph(1, "Para B"),
       ],
-      writing_sentences: [],
     });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockStreamResponse(body) as unknown as Response
@@ -306,10 +277,8 @@ describe("generateArticleAnalysis", () => {
 
   it("sends request and parses ```json code block response", async () => {
     const obj = {
-      summary: "概要",
       version: 1,
       paragraphs: [validParagraph(0, "Para A"), validParagraph(1, "Para B")],
-      writing_sentences: [],
     };
     const body = "```json\n" + JSON.stringify(obj) + "\n```";
     vi.spyOn(globalThis, "fetch").mockResolvedValue(

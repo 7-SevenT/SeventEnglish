@@ -51,12 +51,10 @@ function sseResponse(chunks: string[]) {
 
 const VALID_ANALYSIS = {
   version: 1,
-  summary: "s",
   paragraphs: [
-    { index: 0, original: "P1", translation: "t", highlights: [], writing_sentences: [] },
-    { index: 1, original: "P2", translation: "t", highlights: [], writing_sentences: [] },
+    { index: 0, original: "P1", translation: "t", expressions: [] },
+    { index: 1, original: "P2", translation: "t", expressions: [] },
   ],
-  writing_sentences: [],
 };
 
 describe("vercel-proxy analyze handler", () => {
@@ -114,26 +112,22 @@ describe("vercel-proxy analyze handler", () => {
   });
 
   it("merges parallel chunks into a full analysis (4 paragraphs -> 2 chunks)", async () => {
-    // 4 段 → 每块 2 段 → 2 个并发 fetch，各自返回对应块的 JSON（summary 仅首块）
+    // 4 段 → 每块 2 段 → 2 个并发 fetch，各自返回对应块的 JSON
     const chunk0 = {
       version: 1,
-      summary: "whole article summary",
       paragraphs: [
-        { index: 0, original: "P1", translation: "t1", highlights: [], writing_sentences: [] },
-        { index: 1, original: "P2", translation: "t2", highlights: [], writing_sentences: [] },
+        { index: 0, original: "P1", translation: "t1", expressions: [] },
+        { index: 1, original: "P2", translation: "t2", expressions: [] },
       ],
-      writing_sentences: [{ text: "s", translation: "ts", usage: "u" }],
     };
     const chunk1 = {
       version: 1,
-      summary: "",
       paragraphs: [
-        { index: 2, original: "P3", translation: "t3", highlights: [], writing_sentences: [] },
-        { index: 3, original: "P4", translation: "t4", highlights: [], writing_sentences: [] },
+        { index: 2, original: "P3", translation: "t3", expressions: [] },
+        { index: 3, original: "P4", translation: "t4", expressions: [] },
       ],
-      writing_sentences: [],
     };
-    // 直接驱动 handler：按请求体（user 内容）区分块，返回对应块的 JSON（summary 仅首块）
+    // 直接驱动 handler：按请求体（user 内容）区分块，返回对应块的 JSON
     const fetchMock = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body));
       const user = body.messages[1].content as string;
@@ -156,14 +150,12 @@ describe("vercel-proxy analyze handler", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(JSON.parse(String(res.body).trim())).toEqual({
       version: 1,
-      summary: "whole article summary",
       paragraphs: [
-        { index: 0, original: "P1", translation: "t1", highlights: [], writing_sentences: [] },
-        { index: 1, original: "P2", translation: "t2", highlights: [], writing_sentences: [] },
-        { index: 2, original: "P3", translation: "t3", highlights: [], writing_sentences: [] },
-        { index: 3, original: "P4", translation: "t4", highlights: [], writing_sentences: [] },
+        { index: 0, original: "P1", translation: "t1", expressions: [] },
+        { index: 1, original: "P2", translation: "t2", expressions: [] },
+        { index: 2, original: "P3", translation: "t3", expressions: [] },
+        { index: 3, original: "P4", translation: "t4", expressions: [] },
       ],
-      writing_sentences: [{ text: "s", translation: "ts", usage: "u" }],
     });
   });
 

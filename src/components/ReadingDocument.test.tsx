@@ -8,8 +8,7 @@ const paragraphs: ParagraphAnalysis[] = [{
   index: 0,
   original: "Learn by doing.",
   translation: "边做边学",
-  highlights: [{ text: "Learn", type: "word", meaning: "学习", usage: "verb" }],
-  writing_sentences: [],
+  expressions: [{ text: "Learn by doing", meaning: "在做中学", usage: "proverb-like advice" }],
 }];
 
 const annotations: Annotation[] = [{
@@ -24,11 +23,6 @@ const annotations: Annotation[] = [{
   updated_at: "",
 }];
 
-const paragraphWithSentence: ParagraphAnalysis = {
-  ...paragraphs[0],
-  writing_sentences: [{ text: "Learn by doing.", translation: "边做边学。", usage: "用于强调实践的重要性。" }],
-};
-
 describe("ReadingDocument", () => {
   it("renders both AI and user highlight DOM markers", () => {
     render(<ReadingDocument paragraphs={paragraphs} annotations={annotations} onSelectionChange={vi.fn()} />);
@@ -36,11 +30,11 @@ describe("ReadingDocument", () => {
     expect(document.querySelector('mark[data-annotation-id="9"]')).toBeTruthy();
   });
 
-  it("renders a structured sentence card with separate translation and usage", () => {
-    render(<ReadingDocument paragraphs={[paragraphWithSentence]} annotations={[]} onSelectionChange={vi.fn()} />);
-    expect(document.querySelector(".analysis-sentence__eyebrow")?.textContent).toBe("可迁移句型");
-    expect(document.querySelector(".analysis-sentence__translation")?.textContent).toContain("边做边学");
-    expect(document.querySelector(".analysis-sentence__usage")?.textContent).toContain("实践的重要性");
+  it("renders the expression list with meaning and usage below the paragraph", () => {
+    render(<ReadingDocument paragraphs={paragraphs} annotations={[]} onSelectionChange={vi.fn()} />);
+    expect(document.querySelector(".analysis-word__text")?.textContent).toBe("Learn by doing");
+    expect(document.querySelector(".analysis-word__definition")?.textContent).toContain("在做中学");
+    expect(document.querySelector(".analysis-word__definition")?.textContent).toContain("在做中学 | proverb-like advice");
   });
 
   it("places the paragraph analysis directly below its paragraph", () => {
@@ -48,6 +42,6 @@ describe("ReadingDocument", () => {
     const paragraph = document.querySelector(".article-paragraph");
     expect(paragraph?.querySelector(".article-paragraph__text")).toBeTruthy();
     expect(paragraph?.querySelector(".article-paragraph__analysis")).toBeTruthy();
-    expect(paragraph?.querySelector("summary")?.textContent).toBe("词句精析");
+    expect(paragraph?.querySelector("summary")?.textContent).toBe("段落翻译 & 表达积累");
   });
 });

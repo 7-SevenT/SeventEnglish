@@ -5,7 +5,7 @@
 - **阅读**：文章按发布日期生成时间线，支持 Markdown 与标记。
 - **听力练习**：单词书 → 单元 → 听写练习。听写为**分轮循环**：一页展示当轮全部空位与小圆点播放列表，支持整体开始/暂停；每音频间隔 5 秒自动顺序播放，当前播放项高亮，点圆点可复听（进行中回听当前项后仍续播）；全部播完才统一提交判对错，错词随机重排进入下一轮循环，直到全部正确完成一大轮。每个空位为一个单独输入框（无占位提示），答案含 `$ £ € °C` 等符号时自动预填在输入框两侧（只读，用户不需输入），`%` 需用户自行填写；用户只需输入听到的核心内容，判定时忽略大小写、多余空格与千分位逗号（如 500,000 与 500000 均判对）。词条支持两种音源：上传的音频文件，以及**无音频文件的 TTS 词条**——后者由浏览器自带语音合成（Web Speech API，免费零配置）朗读，听写页可切换美音/英音与语速（偏好本地保存）。
 - **设置**：应用级设置。
-- **管理后台**：网页内发布文章、**多选音频批量上传**（以音频文件名作为答案词，一次可多选文件）并管理单词书/单元；也支持**文本批量导入**——粘贴整单元单词（每行一个，Tab/逗号后跟释义可选），解析预览（错误行标红、重复词标黄）后一键入库为 TTS 词条，管理列表可直接试听。
+- **管理后台**：网页内发布文章、**多选音频批量上传**（以音频文件名作为答案词，一次可多选文件）并管理单词书/单元；也支持**文本批量导入**——粘贴整单元词条（每行一个条目，整行即词条，支持短语/数字组合如 take off、3:00 pm，无需释义），解析预览（重复词标黄）后一键入库为 TTS 词条，管理列表可直接试听。
 
 ## 技术栈
 
@@ -75,7 +75,7 @@ npx wrangler d1 execute <database_name> --file=./db/schema.sql --remote
 npx wrangler d1 execute <database_name> --file=./db/schema.sql
 ```
 
-详见 [设计文档](docs/superpowers/specs/2026-08-09-seventenglish-design.md)。阅读页面与 AI 雅思分析方案见 [阅读分析设计](docs/superpowers/specs/2026-02-14-reading-analysis-design.md)，实施步骤见 [阅读分析实施计划](docs/superpowers/plans/2026-02-14-reading-analysis.md)。段落分析总折叠块设计见 [设计文档](docs/superpowers/specs/2026-08-21-reading-analysis-disclosure-design.md)，实施计划见 [实施计划](docs/superpowers/plans/2026-08-21-reading-analysis-disclosure.md)。数据库分析基础测试位于 `worker/src/db.test.ts`。AI 分析客户端测试位于 `worker/src/articleAnalysis.test.ts`。文章分析接口测试位于 `worker/src/articles-api.test.ts`。段落阅读组件测试位于 `src/components/ArticleParagraph.test.tsx`。文章任意文本标记与评论通过 `ReadingDocument` 的 Tiptap/ProseMirror Mark 保存。文章笔记由 `ArticleNotes` 防抖自动保存。阅读页 UI 参考 ecoSite 的暖米色、深红和衬线卡片风格；重点词/短语在正文中仅使用黑体加粗，每段原文下面紧跟该段词汇、段落翻译与写作句型折叠解析；跨段落划词后会出现受视口边界约束的荧光/评论工具栏，评论以独立弹层展示，删除标记使用带遮罩的现代确认对话框。划词本身不会保存荧光，只有点击工具栏后才会创建标记。
+详见 [设计文档](docs/superpowers/specs/2026-08-09-seventenglish-design.md)。阅读页面与 AI 分析方案见 [阅读分析设计](docs/superpowers/specs/2026-02-14-reading-analysis-design.md)，实施步骤见 [阅读分析实施计划](docs/superpowers/plans/2026-02-14-reading-analysis.md)。段落分析总折叠块设计见 [设计文档](docs/superpowers/specs/2026-08-21-reading-analysis-disclosure-design.md)，实施计划见 [实施计划](docs/superpowers/plans/2026-08-21-reading-analysis-disclosure.md)。数据库分析基础测试位于 `worker/src/db.test.ts`。AI 分析客户端测试位于 `worker/src/articleAnalysis.test.ts`。文章分析接口测试位于 `worker/src/articles-api.test.ts`。段落分析面板测试位于 `src/components/ArticleAnalysisPanel.test.tsx`。文章任意文本标记与评论通过 `ReadingDocument` 的 Tiptap/ProseMirror Mark 保存。文章笔记由 `ArticleNotes` 防抖自动保存。阅读页 UI 参考 ecoSite 的暖米色、深红和衬线卡片风格；值得积累的英语表达（词块）在正文中仅使用黑体加粗，每段原文下面紧跟该段的段落翻译与最值得积累的英语表达折叠解析；跨段落划词后会出现受视口边界约束的荧光/评论工具栏，评论以独立弹层展示，删除标记使用带遮罩的现代确认对话框。划词本身不会保存荧光，只有点击工具栏后才会创建标记。
 
 管理后台全链路重构设计见 [管理工作台设计](docs/superpowers/specs/2026-08-12-admin-workbench-design.md)，包含文章、听写、AI模型三个工作台模块及加密 AI 配置方案。导航模式重构见 [导航栏设计](docs/superpowers/specs/2026-08-12-admin-navigation-design.md)，区分学习模式与管理模式。编辑文章正文后会自动重置 AI 分析状态并重新入队（仅改标题/日期不触发，避免浪费额度）；删除单词书/单元/词条时先删子表再删父表（D1 外键安全）并顺带清理 R2 音频对象。
 

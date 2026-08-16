@@ -139,7 +139,7 @@ describe("article analysis API", () => {
   });
 
   it("consumer stores the analysis text when the analyze service succeeds", async () => {
-    const analysisJson = JSON.stringify({ version: 1, paragraphs: [], writing_sentences: [] });
+    const analysisJson = JSON.stringify({ version: 1, paragraphs: [] });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
       text: async () => analysisJson,

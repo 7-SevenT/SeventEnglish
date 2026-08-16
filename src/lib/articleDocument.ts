@@ -11,9 +11,9 @@ function escapedRegex(text: string): RegExp {
 
 function aiIntervals(text: string, paragraph: ParagraphAnalysis): Interval[] {
   const matches: Interval[] = [];
-  const highlights = [...paragraph.highlights].sort((a, b) => b.text.length - a.text.length);
-  for (const highlight of highlights) {
-    const needle = highlight.text.trim();
+  const expressions = [...paragraph.expressions].sort((a, b) => b.text.length - a.text.length);
+  for (const expression of expressions) {
+    const needle = expression.text.trim();
     if (!needle) continue;
     const pattern = escapedRegex(needle);
     let match: RegExpExecArray | null;

@@ -7,33 +7,24 @@ export type AnalyzeJob = { id: number; title: string; content: string };
 
 export interface ArticleAnalysis {
   version: 1;
-  summary?: string;
   paragraphs: ParagraphAnalysis[];
-  writing_sentences: WritingSentence[];
 }
 
 export interface ParagraphAnalysis {
   index: number;
   original: string;
   translation: string;
-  highlights: HighlightItem[];
-  writing_sentences: WritingSentence[];
+  /** 最值得积累的英语表达（词块），按用户筛选标准由 AI 选出 */
+  expressions: ExpressionItem[];
 }
 
-export interface HighlightItem {
+export interface ExpressionItem {
+  /** 英语表达（词块）原文 */
   text: string;
-  type: "word" | "phrase";
+  /** 中文意思 */
   meaning: string;
+  /** 英语解释 / 用法说明 */
   usage: string;
-  example?: string;
-  ielts_category?: "reading" | "writing" | "speaking" | "general";
-}
-
-export interface WritingSentence {
-  text: string;
-  translation: string;
-  usage: string;
-  tags?: string[];
 }
 
 export interface Article {

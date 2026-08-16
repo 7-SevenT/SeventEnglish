@@ -17,10 +17,9 @@
 const ANALYZE_TOKEN = process.env.ANALYZE_TOKEN || process.env.TOKEN || "";
 
 // ---- 类型（与 worker/src/db.ts 的 ArticleAnalysis 形状一致，仅用于 JSDoc 参考）----
-// WritingSentence: { text, translation, usage, tags? }
-// HighlightItem:  { text, type: "word"|"phrase", meaning, usage, example?, ielts_category? }
-// ParagraphAnalysis: { index, original, translation, highlights[], writing_sentences[] }
-// ArticleAnalysis: { version: 1, summary?, paragraphs[], writing_sentences[] }
+// ExpressionItem: { text, meaning, usage }
+// ParagraphAnalysis: { index, original, translation, expressions[] }
+// ArticleAnalysis: { version: 1, paragraphs[] }
 
 function splitParagraphs(content) {
   return content.split(/\n\s*\n+/).map((p) => p.trim()).filter(Boolean);
@@ -53,25 +52,9 @@ function array(value, label) {
   return value;
 }
 
-function validateWriting(value, label) {
+function validateExpression(value, label) {
   const v = object(value, label);
-  const tags = v.tags === undefined ? undefined : array(v.tags, `${label}.tags`).map((x, i) => string(x, `${label}.tags[${i}]`));
-  return { text: string(v.text, `${label}.text`), translation: string(v.translation, `${label}.translation`), usage: string(v.usage, `${label}.usage`), ...(tags ? { tags } : {}) };
-}
-
-function validateHighlight(value, label) {
-  const v = object(value, label);
-  const type = string(v.type, `${label}.type`);
-  if (type !== "word" && type !== "phrase") throw new Error(`${label}.type is invalid`);
-  // 容错：AI 偶发返回非标准/非字符串的 ielts_category（如 "vocabulary"），
-  // 此时忽略该字段而非让整个分析失败（生产容错，与 worker/src/articleAnalysis.ts 的严格校验有差异）。
-  let category;
-  if (v.ielts_category !== undefined) {
-    if (typeof v.ielts_category === "string" && ["reading", "writing", "speaking", "general"].includes(v.ielts_category)) {
-      category = v.ielts_category;
-    }
-  }
-  return { text: string(v.text, `${label}.text`), type, meaning: string(v.meaning, `${label}.meaning`), usage: string(v.usage, `${label}.usage`), ...(v.example === undefined ? {} : { example: string(v.example, `${label}.example`) }), ...(category ? { ielts_category: category } : {}) };
+  return { text: string(v.text, `${label}.text`), meaning: string(v.meaning, `${label}.meaning`), usage: string(v.usage, `${label}.usage`) };
 }
 
 function validateArticleAnalysis(value, paragraphs) {
@@ -83,16 +66,24 @@ function validateArticleAnalysis(value, paragraphs) {
     const p = object(raw, `paragraphs[${i}]`);
     if (p.index !== i) throw new Error(`paragraphs[${i}].index mismatch`);
     if (p.original !== paragraphs[i]) throw new Error(`paragraphs[${i}].original mismatch`);
-    return { index: i, original: paragraphs[i], translation: string(p.translation, `paragraphs[${i}].translation`), highlights: array(p.highlights, `paragraphs[${i}].highlights`).map((x, j) => validateHighlight(x, `paragraphs[${i}].highlights[${j}]`)), writing_sentences: array(p.writing_sentences, `paragraphs[${i}].writing_sentences`).map((x, j) => validateWriting(x, `paragraphs[${i}].writing_sentences[${j}]`)) };
+    return { index: i, original: paragraphs[i], translation: string(p.translation, `paragraphs[${i}].translation`), expressions: array(p.expressions, `paragraphs[${i}].expressions`).map((x, j) => validateExpression(x, `paragraphs[${i}].expressions[${j}]`)) };
   });
-  return { version: 1, ...(v.summary === undefined ? {} : { summary: string(v.summary, "analysis.summary") }), paragraphs: parsed, writing_sentences: array(v.writing_sentences, "analysis.writing_sentences").map((x, i) => validateWriting(x, `writing_sentences[${i}]`)) };
+  return { version: 1, paragraphs: parsed };
 }
 
-// 分块版提示词：要求 AI 只分析列出的段落（带全局 0-based index），
-// summary 仅在第一个 chunk 生成。多块并行可显著降低单次请求耗时，
-// 从而避开 Vercel Hobby 300s 上限、Cloudflare 边缘代理 100s 无响应 524、
-// 以及本地网络 ~180s 长连接断开三类限制。
-const SYSTEM_PROMPT = `You are an IELTS English reading analyst. Analyze ONLY the article paragraphs listed below (each labeled with its global 0-based index into the full article). Return only valid JSON matching this shape: {"version":1,"summary":"string","paragraphs":[{"index":0,"original":"exact paragraph text","translation":"Chinese translation","highlights":[{"text":"word or phrase","type":"word|phrase","meaning":"Chinese meaning","usage":"usage","example":"optional","ielts_category":"reading|writing|speaking|general"}],"writing_sentences":[{"text":"sentence","translation":"Chinese translation","usage":"IELTS usage","tags":["tag"]}]}],"writing_sentences":[]}. The summary must describe the whole article and is required only for the first chunk (indices starting from 0); for other chunks return an empty string. Preserve every paragraph original exactly. Keep highlights selective and useful; do not list ordinary words or generic explanations. For writing_sentences, select at most one sentence per paragraph and only include it when it has clearly transferable IELTS writing value (a reusable structure, contrast, concession, cause-effect, comparison, or other strong academic pattern). Never include a merely correct or ordinary sentence just to fill the field; return an empty array when no sentence is especially valuable. Apply the same strict rule to the top-level writing_sentences.`;
+// 分块版提示词：要求 AI 只分析列出的段落（带全局 0-based index）。
+// 多块并行可显著降低单次请求耗时，从而避开 Vercel Hobby 300s 上限、
+// Cloudflare 边缘代理 100s 无响应 524、以及本地网络 ~180s 长连接断开三类限制。
+const SYSTEM_PROMPT = `You are an English reading analyst. Analyze ONLY the article paragraphs listed below (each labeled with its global 0-based index into the full article). Return only valid JSON matching this shape: {"version":1,"paragraphs":[{"index":0,"original":"exact paragraph text","translation":"Chinese translation","expressions":[{"text":"expression (chunk)","meaning":"Chinese meaning","usage":"English explanation and usage"}]}]}. Preserve every paragraph original exactly.
+
+For "expressions", select the MOST WORTHWHILE English expressions to remember and reuse from each paragraph (collocations, phrasal verbs, fixed phrases, and other chunks). Every selected item must satisfy ALL of these criteria:
+- High-frequency, natural, and reusable in everyday or formal contexts;
+- Common in quality journalism, news, and formal English;
+- Each word is familiar on its own, but the combination is not easy to understand or guess;
+- Worth memorizing as a single chunk;
+- Transferable to other articles and situations;
+- Never select proper nouns, low-frequency words, or expressions unique to this article;
+- Quality over quantity: fewer good items are better; return an empty array when a paragraph yields nothing worth memorizing.`;
 
 // 每块最多段落数：实测 2 段/块在 siliconflow 上约 18-45s（偶发 90s+），
 // 16 段文章 8 块并行总耗时约 95s，压线但可接受；块更小可进一步降低总耗时。
@@ -169,10 +160,9 @@ async function streamChatCompletion(base, model, apiKey, messages, timeoutMs) {
 }
 
 /**
- * 分析一个块（1~CHUNK_SIZE 段）。返回 { summary?, paragraphs, writing_sentences }，
- * 段落已校验 index/original/字段。summary 仅首块生成。
+ * 分析一个块（1~CHUNK_SIZE 段）。返回 { paragraphs }，段落已校验 index/original/字段。
  */
-async function analyzeChunk({ baseUrl, model, apiKey }, title, chunk, isFirst, timeoutMs) {
+async function analyzeChunk({ baseUrl, model, apiKey }, title, chunk, timeoutMs) {
   const base = baseUrl.replace(/\/+$/, "");
   const chunkText = chunk.map((p) => `[${p.index}] ${p.original}`).join("\n\n");
   const accumulated = await streamChatCompletion(
@@ -192,22 +182,20 @@ async function analyzeChunk({ baseUrl, model, apiKey }, title, chunk, isFirst, t
     const p = object(raw, `paragraphs[${i}]`);
     if (p.index !== chunk[i].index) throw new Error(`paragraphs[${i}].index mismatch`);
     if (p.original !== chunk[i].original) throw new Error(`paragraphs[${i}].original mismatch`);
-    return { index: chunk[i].index, original: chunk[i].original, translation: string(p.translation, `paragraphs[${i}].translation`), highlights: array(p.highlights, `paragraphs[${i}].highlights`).map((x, j) => validateHighlight(x, `paragraphs[${i}].highlights[${j}]`)), writing_sentences: array(p.writing_sentences, `paragraphs[${i}].writing_sentences`).map((x, j) => validateWriting(x, `paragraphs[${i}].writing_sentences[${j}]`)) };
+    return { index: chunk[i].index, original: chunk[i].original, translation: string(p.translation, `paragraphs[${i}].translation`), expressions: array(p.expressions, `paragraphs[${i}].expressions`).map((x, j) => validateExpression(x, `paragraphs[${i}].expressions[${j}]`)) };
   });
-  const summary = isFirst && typeof v.summary === "string" && v.summary ? v.summary : undefined;
-  const writingSentences = array(v.writing_sentences, "analysis.writing_sentences").map((x, i) => validateWriting(x, `writing_sentences[${i}]`));
-  return { summary, paragraphs, writing_sentences: writingSentences };
+  return { paragraphs };
 }
 
 /**
  * 单块分析 + 一次性重试：AI 偶发输出格式漂移（非 JSON / 校验失败）时重试一次；
  * 超时类错误不重试（重试也会超时，浪费额度与时间）。
  */
-async function analyzeChunkWithRetry(config, title, chunk, isFirst, timeoutMs) {
+async function analyzeChunkWithRetry(config, title, chunk, timeoutMs) {
   let lastError;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      return await analyzeChunk(config, title, chunk, isFirst, timeoutMs);
+      return await analyzeChunk(config, title, chunk, timeoutMs);
     } catch (error) {
       lastError = error;
       if (error instanceof Error && /timed out/i.test(error.message)) throw error;
@@ -232,17 +220,15 @@ async function generateArticleAnalysis(config, title, content, timeoutMs = 28000
 
   if (chunks.length === 1) {
     // 单块：直接完整分析
-    const result = await analyzeChunkWithRetry(config, title, chunks[0], true, timeoutMs);
-    const merged = { version: 1, ...(result.summary ? { summary: result.summary } : {}), paragraphs: result.paragraphs, writing_sentences: result.writing_sentences };
+    const result = await analyzeChunkWithRetry(config, title, chunks[0], timeoutMs);
+    const merged = { version: 1, paragraphs: result.paragraphs };
     return validateArticleAnalysis(merged, rawParagraphs);
   }
 
   const perChunkTimeout = Math.min(120000, timeoutMs);
-  const results = await Promise.all(chunks.map((chunk, i) => analyzeChunkWithRetry(config, title, chunk, i === 0, perChunkTimeout)));
+  const results = await Promise.all(chunks.map((chunk) => analyzeChunkWithRetry(config, title, chunk, perChunkTimeout)));
   const allParagraphs = results.flatMap((r) => r.paragraphs).sort((a, b) => a.index - b.index);
-  const summary = results.find((r) => r.summary)?.summary;
-  const writingSentences = results.flatMap((r) => r.writing_sentences);
-  const merged = { version: 1, ...(summary ? { summary } : {}), paragraphs: allParagraphs, writing_sentences: writingSentences };
+  const merged = { version: 1, paragraphs: allParagraphs };
   return validateArticleAnalysis(merged, rawParagraphs);
 }
 

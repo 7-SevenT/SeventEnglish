@@ -17,33 +17,10 @@ function renderAnalysis(container: HTMLElement, analysis: ParagraphAnalysis | nu
   const details = document.createElement("details");
   details.className = "analysis-disclosure";
   const summary = document.createElement("summary");
-  summary.textContent = "词句精析";
+  summary.textContent = "段落翻译 & 表达积累";
   details.appendChild(summary);
   const content = document.createElement("div");
   content.className = "analysis-content";
-
-  const vocabulary = document.createElement("section");
-  vocabulary.className = "analysis-section";
-  vocabulary.appendChild(textNode("h4", "重点词/短语"));
-  if (analysis.highlights.length === 0) {
-    vocabulary.appendChild(textNode("p", "本段暂无重点词汇。", "muted"));
-  } else {
-    const list = document.createElement("div");
-    list.className = "analysis-highlight-list";
-    for (const highlight of analysis.highlights) {
-      const item = document.createElement("div");
-      item.className = "analysis-word";
-      item.appendChild(textNode("strong", highlight.text, "analysis-word__text"));
-      const definition = document.createElement("span");
-      definition.className = "analysis-word__definition";
-      definition.appendChild(document.createTextNode(highlight.meaning));
-      if (highlight.usage) definition.appendChild(textNode("em", ` | ${highlight.usage}`));
-      item.appendChild(definition);
-      list.appendChild(item);
-    }
-    vocabulary.appendChild(list);
-  }
-  content.appendChild(vocabulary);
 
   const translation = document.createElement("section");
   translation.className = "analysis-section";
@@ -51,32 +28,29 @@ function renderAnalysis(container: HTMLElement, analysis: ParagraphAnalysis | nu
   translation.appendChild(textNode("p", analysis.translation, "analysis-translation"));
   content.appendChild(translation);
 
-  if (analysis.writing_sentences.length > 0) {
-    const sentenceSection = document.createElement("section");
-    sentenceSection.className = "analysis-section analysis-section--sentence";
-    sentenceSection.appendChild(textNode("h4", "雅思句型分析"));
-    for (const sentence of analysis.writing_sentences.slice(0, 1)) {
+  const vocabulary = document.createElement("section");
+  vocabulary.className = "analysis-section";
+  vocabulary.appendChild(textNode("h4", "最值得积累的英语表达"));
+  if (analysis.expressions.length === 0) {
+    vocabulary.appendChild(textNode("p", "本段暂无值得积累的表达。", "muted"));
+  } else {
+    const list = document.createElement("div");
+    list.className = "analysis-highlight-list";
+    for (const expression of analysis.expressions) {
       const item = document.createElement("div");
-      item.className = "analysis-sentence";
-      item.appendChild(textNode("div", "可迁移句型", "analysis-sentence__eyebrow"));
-      item.appendChild(textNode("p", sentence.text, "analysis-sentence__english"));
-      const details = document.createElement("div");
-      details.className = "analysis-sentence__details";
-      const translation = document.createElement("p");
-      translation.className = "analysis-sentence__translation";
-      translation.appendChild(textNode("span", "译", "analysis-sentence__label"));
-      translation.appendChild(document.createTextNode(sentence.translation));
-      const usage = document.createElement("p");
-      usage.className = "analysis-sentence__usage";
-      usage.appendChild(textNode("span", "用", "analysis-sentence__label"));
-      usage.appendChild(document.createTextNode(sentence.usage));
-      details.appendChild(translation);
-      details.appendChild(usage);
-      item.appendChild(details);
-      sentenceSection.appendChild(item);
+      item.className = "analysis-word";
+      item.appendChild(textNode("strong", expression.text, "analysis-word__text"));
+      const definition = document.createElement("span");
+      definition.className = "analysis-word__definition";
+      definition.appendChild(document.createTextNode(expression.meaning));
+      if (expression.usage) definition.appendChild(textNode("em", ` | ${expression.usage}`));
+      item.appendChild(definition);
+      list.appendChild(item);
     }
-    content.appendChild(sentenceSection);
+    vocabulary.appendChild(list);
   }
+  content.appendChild(vocabulary);
+
   details.appendChild(content);
   container.appendChild(details);
 }
