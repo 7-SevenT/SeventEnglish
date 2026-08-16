@@ -273,21 +273,21 @@ async function requestRaw(env: Env, path: string, init: RequestInit = {}) {
 // 可注入自定 mock DB（支持 article CRUD 的状态式存储）。
 function statefulArticleDb() {
   let nextId = 1;
-  const articles = new Map<number, { id: number; title: string; content: string; publish_date: string }>();
+  const articles = new Map<number, { id: number; title: string; subtitle: string | null; content: string; publish_date: string }>();
   return {
     prepare(stmt: string) {
       return {
         bind: (...params: unknown[]) => {
           if (stmt.startsWith("INSERT INTO articles")) {
             const id = nextId++;
-            const [title, content, publish_date] = params as unknown as [string, string, string];
-            articles.set(id, { id, title, content, publish_date });
+            const [title, subtitle, content, publish_date] = params as unknown as [string, string | null, string, string];
+            articles.set(id, { id, title, subtitle, content, publish_date });
             return stateRun(id);
           }
           if (stmt.startsWith("UPDATE articles")) {
-            const [title, content, publish_date, id] = params as unknown as [string, string, string, number];
+            const [title, subtitle, content, publish_date, id] = params as unknown as [string, string | null, string, string, number];
             const cur = articles.get(Number(id));
-            if (cur) Object.assign(cur, { title, content, publish_date });
+            if (cur) Object.assign(cur, { title, subtitle, content, publish_date });
             return stateRun();
           }
           if (stmt.startsWith("DELETE FROM articles")) {
@@ -375,7 +375,7 @@ describe("admin article API", () => {
     const src = statefulArticleDb();
     const env = { ...mockEnv(), DB: src as unknown as D1Database, BUCKET: {} as R2Bucket };
     // 预置一条初始文章
-    await env.DB.prepare("INSERT INTO articles").bind("Old", "Content", "2026-08-01").run();
+    await env.DB.prepare("INSERT INTO articles").bind("Old", null, "Content", "2026-08-01").run();
     const res = await requestRaw(env, "/api/articles/1", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -388,12 +388,31 @@ describe("admin article API", () => {
     expect(body.publish_date).toBe("2026-08-01");
   });
 
+  it("PATCH article updates and clears subtitle (empty string → null)", async () => {
+    const src = statefulArticleDb();
+    const env = { ...mockEnv(), DB: src as unknown as D1Database, BUCKET: {} as R2Bucket };
+    await env.DB.prepare("INSERT INTO articles").bind("Old", null, "Content", "2026-08-01").run();
+    const updated = await requestRaw(env, "/api/articles/1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subtitle: "副标题" }),
+    });
+    expect(updated.status).toBe(200);
+    expect((await updated.json<{ subtitle: string | null }>()).subtitle).toBe("副标题");
+    const cleared = await requestRaw(env, "/api/articles/1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subtitle: "  " }),
+    });
+    expect((await cleared.json<{ subtitle: string | null }>()).subtitle).toBeNull();
+  });
+
   it("DELETE /api/articles invalid id → 404 and valid id runs delete", async () => {
     const bad = await requestRaw(mockWriteEnv().env, "/api/articles/abc", { method: "DELETE" });
     expect(bad.status).toBe(404);
     const src = statefulArticleDb();
     const env = { ...mockEnv(), DB: src as unknown as D1Database, BUCKET: {} as R2Bucket };
-    await env.DB.prepare("INSERT INTO articles").bind("X", "Y", "2026-01-01").run();
+    await env.DB.prepare("INSERT INTO articles").bind("X", null, "Y", "2026-01-01").run();
     await requestRaw(env, "/api/articles/1", { method: "DELETE" });
     expect(src.articles.size).toBe(0);
   });

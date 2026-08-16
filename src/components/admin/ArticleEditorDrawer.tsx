@@ -3,7 +3,7 @@ import type { Article } from "../../../worker/src/db";
 import { readArticleSource } from "../../lib/adminImport";
 import { AdminDrawer } from "./AdminDrawer";
 
-export type ArticleDraft = Pick<Article, "title" | "publish_date" | "content">;
+export type ArticleDraft = Pick<Article, "title" | "subtitle" | "publish_date" | "content">;
 
 type Props = {
   open: boolean;
@@ -23,6 +23,7 @@ function today(): string {
 function initialDraft(value?: Partial<ArticleDraft>): ArticleDraft {
   return {
     title: value?.title ?? "",
+    subtitle: value?.subtitle ?? "",
     publish_date: value?.publish_date ?? today(),
     content: value?.content ?? "",
   };
@@ -73,7 +74,7 @@ export function ArticleEditorDrawer({ open, mode, initialValue, onClose, onSave 
     setSaving(true);
     setError("");
     try {
-      await onSave({ ...draft, title: draft.title.trim(), content: draft.content.trim() });
+      await onSave({ ...draft, title: draft.title.trim(), subtitle: (draft.subtitle ?? "").trim() || null, content: draft.content.trim() });
       setDirty(false);
       onClose();
     } catch (cause) {
@@ -102,6 +103,10 @@ export function ArticleEditorDrawer({ open, mode, initialValue, onClose, onSave 
         <label htmlFor="article-title">标题</label>
         <input id="article-title" className="input" value={draft.title} onChange={(event) => update("title", event.target.value)} />
         {fieldErrors.title && <p className="admin-field__error">{fieldErrors.title}</p>}
+      </div>
+      <div className="admin-field">
+        <label htmlFor="article-subtitle">副标题 <span className="admin-field__hint">可选</span></label>
+        <input id="article-subtitle" className="input" value={draft.subtitle ?? ""} onChange={(event) => update("subtitle", event.target.value)} placeholder="一句话说明文章内容，可为空" />
       </div>
       <div className="admin-field">
         <label htmlFor="article-date">发布日期</label>

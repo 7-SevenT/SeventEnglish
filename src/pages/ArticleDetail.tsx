@@ -119,6 +119,7 @@ export function ArticleDetail() {
     <div className="container container--wide article-detail">
       <Link className="back-link" to="/read">← 返回时间线</Link>
       <h1 className="page-title">{article.title}</h1>
+      {article.subtitle && <p className="article-subtitle">{article.subtitle}</p>}
       <p className="article-date">{article.publish_date}</p>
       <div className="article-layout">
         <main className="article-reading" aria-label="文章正文">

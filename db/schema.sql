@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS articles (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   title        TEXT NOT NULL,
+  subtitle     TEXT,
   content      TEXT NOT NULL,
   publish_date    TEXT NOT NULL,
   analysis_status TEXT NOT NULL DEFAULT 'pending',

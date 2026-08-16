@@ -17,6 +17,7 @@ export type AnalyzeServicePublicConfig = {
 
 export function createArticle(data: {
   title: string;
+  subtitle?: string | null;
   content: string;
   publish_date: string;
 }) {
@@ -31,7 +32,7 @@ export function reanalyzeArticle(id: number) {
 
 export function updateArticle(
   id: number,
-  data: Partial<{ title: string; content: string; publish_date: string }>
+  data: Partial<{ title: string; subtitle: string | null; content: string; publish_date: string }>
 ) {
   return apiFetch<Article>(`/articles/${id}`, {
     method: "PATCH",

@@ -26,6 +26,7 @@ export function Read() {
               <li key={a.id}>
                 <Link className="card card-link" to={`/read/${a.id}`}>
                   <span className="card-title">{a.title}</span>
+                  {a.subtitle && <span className="card-subtitle">{a.subtitle}</span>}
                 </Link>
               </li>
             ))}

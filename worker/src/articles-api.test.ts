@@ -17,7 +17,7 @@ function env() {
       let params: any[] = [];
       const run = async () => {
         if (/INSERT INTO articles/.test(sql)) {
-          const id = next++; rows.set(id, { id, title: params[0], content: params[1], publish_date: params[2], analysis_status: "pending", analysis_json: null, analysis_error: null });
+          const id = next++; rows.set(id, { id, title: params[0], subtitle: params[1], content: params[2], publish_date: params[3], analysis_status: "pending", analysis_json: null, analysis_error: null });
         }
         if (/UPDATE articles/.test(sql)) {
           const row = rows.get(params.at(-1)); if (row) {

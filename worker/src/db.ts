@@ -32,6 +32,7 @@ export interface ExpressionItem {
 export interface Article {
   id: number;
   title: string;
+  subtitle: string | null;
   content: string;
   publish_date: string;
   analysis_status: AnalysisStatus;
@@ -90,6 +91,7 @@ export interface Setting {
 export const defaultSchema = `CREATE TABLE IF NOT EXISTS articles (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   title        TEXT NOT NULL,
+  subtitle     TEXT,
   content      TEXT NOT NULL,
   publish_date    TEXT NOT NULL,
   analysis_status TEXT NOT NULL DEFAULT 'pending',
@@ -158,7 +160,7 @@ CREATE INDEX IF NOT EXISTS idx_article_notes_article_id ON article_notes(article
 // 当前 schema/迁移版本：每次有新的 DDL/迁移时递增。
 // applySchema 会读取 settings 表中的 schema_version 标记，
 // 已是最新版本时直接返回（避免每个请求都重复执行建表/迁移语句）。
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const SCHEMA_VERSION_KEY = "schema_version";
 
 export async function applySchema(db: D1Database): Promise<void> {
@@ -212,6 +214,8 @@ export async function applySchema(db: D1Database): Promise<void> {
     "ALTER TABLE articles ADD COLUMN analysis_error TEXT",
     // words.definition：文本导入（TTS 词条）的释义列；audio_key 语义扩展为"空串 = TTS 词条"，无需改列约束。
     "ALTER TABLE words ADD COLUMN definition TEXT NOT NULL DEFAULT ''",
+    // 文章副标题（可选）：v2 迁移。
+    "ALTER TABLE articles ADD COLUMN subtitle TEXT",
   ];
   for (const migration of migrations) {
     try {
@@ -231,7 +235,7 @@ export async function listArticlesGroupedByDate(db: D1Database) {
   const { results } = await db
     .prepare(
       `SELECT publish_date,
-              json_group_array(json_object('id', id, 'title', title, 'analysis_status', analysis_status)) AS articles
+              json_group_array(json_object('id', id, 'title', title, 'subtitle', subtitle, 'analysis_status', analysis_status)) AS articles
        FROM articles
        GROUP BY publish_date
        ORDER BY publish_date DESC`
@@ -239,7 +243,7 @@ export async function listArticlesGroupedByDate(db: D1Database) {
     .all<{ publish_date: string; articles: string }>();
   return results.map((r) => ({
     date: r.publish_date,
-    articles: JSON.parse(r.articles) as { id: number; title: string }[],
+    articles: JSON.parse(r.articles) as { id: number; title: string; subtitle: string | null }[],
   }));
 }
 
@@ -254,11 +258,11 @@ export async function getArticle(db: D1Database, id: number) {
 
 export async function createArticle(
   db: D1Database,
-  data: { title: string; content: string; publish_date: string }
+  data: { title: string; subtitle?: string | null; content: string; publish_date: string }
 ) {
   await db
-    .prepare("INSERT INTO articles (title, content, publish_date) VALUES (?, ?, ?)")
-    .bind(data.title, data.content, data.publish_date)
+    .prepare("INSERT INTO articles (title, subtitle, content, publish_date) VALUES (?, ?, ?, ?)")
+    .bind(data.title, data.subtitle ?? null, data.content, data.publish_date)
     .run();
   return getArticle(db, Number(await lastRowId(db)));
 }

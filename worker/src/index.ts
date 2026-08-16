@@ -489,6 +489,7 @@ function isInvalidId(value: string): boolean {
 app.post("/api/articles", async (c) => {
   const body = await readJson<{
     title?: string;
+    subtitle?: string;
     content?: string;
     publish_date?: string;
   }>(c.req.raw);
@@ -497,6 +498,7 @@ app.post("/api/articles", async (c) => {
   }
   const article = await createArticle(c.env.DB, {
     title: body.title,
+    subtitle: typeof body.subtitle === "string" ? body.subtitle.trim() || null : null,
     content: body.content,
     publish_date: body.publish_date,
   });
@@ -575,6 +577,7 @@ app.patch("/api/articles/:id", async (c) => {
   if (isInvalidId(id)) return c.json({ error: "not found" }, 404);
   const body = await readJson<{
     title?: string;
+    subtitle?: string | null;
     content?: string;
     publish_date?: string;
   }>(c.req.raw);
@@ -582,12 +585,14 @@ app.patch("/api/articles/:id", async (c) => {
   const article = await getArticle(c.env.DB, Number(id));
   if (!article) return c.json({ error: "not found" }, 404);
   const title = body.title ?? article.title;
+  // 副标题：不传保留原值；传空串/null 清除。
+  const subtitle = typeof body.subtitle === "string" ? (body.subtitle.trim() || null) : article.subtitle;
   const content = body.content ?? article.content;
   const publish_date = body.publish_date ?? article.publish_date;
   await c.env.DB.prepare(
-    "UPDATE articles SET title = ?, content = ?, publish_date = ?, updated_at = datetime('now') WHERE id = ?"
+    "UPDATE articles SET title = ?, subtitle = ?, content = ?, publish_date = ?, updated_at = datetime('now') WHERE id = ?"
   )
-    .bind(title, content, publish_date, Number(id))
+    .bind(title, subtitle, content, publish_date, Number(id))
     .run();
   // 正文变更后旧分析结果与内容错位（段落 index/原文不匹配），
   // 重置分析状态并重新入队；仅改标题/日期时不触发，避免浪费 AI 额度。

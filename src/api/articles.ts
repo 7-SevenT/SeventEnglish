@@ -3,7 +3,7 @@ import type { Article, Annotation, ArticleNote } from "../../worker/src/db";
 
 export interface ArticleGroup {
   date: string;
-  articles: { id: number; title: string; analysis_status?: Article["analysis_status"] }[];
+  articles: { id: number; title: string; subtitle?: string | null; analysis_status?: Article["analysis_status"] }[];
 }
 
 export async function listArticles(): Promise<ArticleGroup[]> {
