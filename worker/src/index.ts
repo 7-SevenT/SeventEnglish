@@ -382,6 +382,9 @@ app.get("/api/units/:unitId/words", async (c) => {
 // 文本批量导入（TTS 词条）：JSON body { items: [{ word, definition? }] }，单次 1-500 条。
 // 校验 + 同单元去重（大小写不敏感）+ sort_order 递增插入；audio_key 写空串 ''（语义 = TTS 词条，
 // 前端用浏览器 speechSynthesis 朗读，无需 R2 音频）。返回 created / skipped / duplicates / invalid。
+// 写入必须用 D1 batch() 一次提交：逐条串行 INSERT 时每条都是一次 D1 网络往返，几百条词条的
+// wall time 极易超出 Workers 免费计划 30s 硬限制，请求被平台终止（不返回响应体），
+// 浏览器 fetch 只会抛 "Failed to fetch"，表现为"文本导入无法导入"。
 app.post("/api/units/:unitId/words/bulk", async (c) => {
   const unitId = Number(c.req.param("unitId"));
   if (Number.isNaN(unitId) || !Number.isInteger(unitId) || unitId <= 0) {
@@ -434,14 +437,14 @@ app.post("/api/units/:unitId/words/bulk", async (c) => {
     rows.push({ word, definition });
   }
 
-  for (const row of rows) {
+  // 构造 INSERT 语句后用 batch() 一次性原子提交（500 条 < batch 1000 语句上限）。
+  const statements = rows.map((row) => {
     sortOrder += 1;
-    await c.env.DB.prepare(
+    return c.env.DB.prepare(
       "INSERT INTO words (unit_id, word, audio_key, definition, sort_order) VALUES (?, ?, ?, ?, ?)"
-    )
-      .bind(unitId, row.word, "", row.definition, sortOrder)
-      .run();
-  }
+    ).bind(unitId, row.word, "", row.definition, sortOrder);
+  });
+  if (statements.length > 0) await c.env.DB.batch(statements);
   return c.json({
     ok: true,
     created: rows.length,

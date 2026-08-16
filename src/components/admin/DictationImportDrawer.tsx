@@ -25,7 +25,6 @@ type ImportTab = "audio" | "text";
 interface PreviewRow {
   line: number;
   word: string;
-  definition: string;
   status: "ok" | "duplicate" | "error";
   message?: string;
 }
@@ -69,15 +68,14 @@ export function DictationImportDrawer({ open, books, units, bookId, unitId, onBo
       .map((row) => {
         const err = errorsByLine.get(row.line);
         if (err) {
-          return { line: row.line, word: row.raw, definition: "", status: "error" as const, message: err.message };
+          return { line: row.line, word: row.raw, status: "error" as const, message: err.message };
         }
         const item = itemsByLine.get(row.line);
-        if (!item) return { line: row.line, word: row.raw, definition: "", status: "error" as const, message: "无法解析" };
+        if (!item) return { line: row.line, word: row.raw, status: "error" as const, message: "无法解析" };
         const dup = existingWords.has(normalizeWord(item.word));
         return {
           line: item.line,
           word: item.word,
-          definition: item.definition,
           status: dup ? "duplicate" : "ok",
           message: dup ? "单元内已存在，导入时跳过" : undefined,
         };
@@ -122,7 +120,7 @@ export function DictationImportDrawer({ open, books, units, bookId, unitId, onBo
   }
 
   return (
-    <AdminDrawer open={open} title="导入听写词条" description="音频导入自动从文件名解析答案；文本导入直接粘贴整单元单词。" dirty={items.some((item) => item.status === "queued" || item.status === "failed")} onClose={onClose}>
+    <AdminDrawer open={open} title="导入听写词条" description="音频导入自动从文件名解析答案；文本导入粘贴每行一个词条（支持短语，无需释义）。" dirty={items.some((item) => item.status === "queued" || item.status === "failed")} onClose={onClose}>
       <div className="admin-import-steps"><span className="admin-import-step admin-import-step--active">1 选择位置</span><span>→</span><span className={unitId ? "admin-import-step admin-import-step--active" : "admin-import-step"}>{tab === "text" ? "2 粘贴单词" : "2 导入音频"}</span></div>
       <div className="import-tabs" role="tablist" aria-label="导入方式">
         <button type="button" role="tab" aria-selected={tab === "audio"} className={`import-tab${tab === "audio" ? " import-tab--active" : ""}`} onClick={() => { setTab("audio"); setImportMessage(""); }}>音频导入</button>
@@ -159,20 +157,19 @@ export function DictationImportDrawer({ open, books, units, bookId, unitId, onBo
           <textarea
             className="textarea import-text__area"
             aria-label="粘贴单词列表"
-            placeholder={"每行一个单词，Tab 或逗号后跟释义（可选）：\napple\t苹果\nbanana\t香蕉\ncherry"}
+            placeholder={"每行一个单词或短语（无需释义）：\ntake off\n3:00 pm\nNew York"}
             value={text}
             onChange={(event) => setText(event.target.value)}
             rows={8}
           />
-          <p className="import-text__hint">每行一个单词；Tab、逗号或两个以上空格分隔释义（可选）。纯单词列表同样支持。</p>
+          <p className="import-text__hint">每行一个条目，整行作为词条导入；支持短语、数字与标点组合，无需释义。</p>
           {previewRows.length > 0 && (
             <div className="import-preview">
-              <div className="import-preview__head"><span>行</span><span>单词</span><span>释义</span><span>状态</span></div>
+              <div className="import-preview__head"><span>行</span><span>词条</span><span>状态</span></div>
               {previewRows.map((row) => (
                 <div key={row.line} className={`import-preview__row${row.status === "error" ? " import-preview__row--error" : ""}${row.status === "duplicate" ? " import-preview__row--duplicate" : ""}`}>
                   <span>{row.line}</span>
                   <span>{row.word}</span>
-                  <span>{row.definition || "—"}</span>
                   <span>{row.status === "ok" ? "待导入" : (row.message ?? "")}</span>
                 </div>
               ))}

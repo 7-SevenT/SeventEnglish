@@ -209,6 +209,12 @@ function mockWriteDb(ops: DbOp[], unitExists = true, wordKeys: string[] = []): D
         },
       };
     },
+    batch: async (stmts: Array<{ run: () => Promise<unknown> }>) => {
+      // 语句在 prepare().bind() 时已记录进 ops，batch 仅负责"执行"，避免重复记录
+      const results: unknown[] = [];
+      for (const s of stmts) results.push(await s.run());
+      return results;
+    },
   } as unknown as D1Database;
 }
 
@@ -605,6 +611,11 @@ describe("bulk text import API (TTS words)", () => {
             return result(stmt);
           },
         };
+      },
+      batch: async (stmts: Array<{ run: () => Promise<unknown> }>) => {
+        const out: unknown[] = [];
+        for (const s of stmts) out.push(await s.run());
+        return out;
       },
     } as unknown as D1Database;
     const env = { ...mockEnv(), DB: db };

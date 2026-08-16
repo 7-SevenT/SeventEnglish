@@ -53,37 +53,38 @@ describe("DictationImportDrawer", () => {
     expect(screen.getByDisplayValue("lesson-01")).toBeTruthy();
   });
 
-  it("text tab parses pasted word list into a preview", async () => {
+  it("text tab parses pasted entry list into a preview (whole line as entry)", async () => {
     renderDrawer();
     fireEvent.click(screen.getByRole("tab", { name: "文本导入" }));
     const textarea = await screen.findByLabelText("粘贴单词列表");
-    fireEvent.change(textarea, { target: { value: "apple\t苹果\nbanana\n, 缺单词行\ncherry  樱桃" } });
+    fireEvent.change(textarea, { target: { value: "apple\nbanana\ntake off\nNew York, NY\n3:00 pm" } });
     await waitFor(() => {
       expect(screen.getByText("apple")).toBeTruthy();
-      expect(screen.getByText("cherry")).toBeTruthy();
+      expect(screen.getByText("take off")).toBeTruthy();
+      expect(screen.getByText("New York, NY")).toBeTruthy();
+      expect(screen.getByText("3:00 pm")).toBeTruthy();
     });
-    // 4 个非空行：3 个可导入 + 1 个错误行（缺少单词）
-    expect(document.querySelectorAll(".import-preview__row").length).toBe(4);
-    expect(document.querySelectorAll(".import-preview__row--error").length).toBe(1);
-    expect(screen.getAllByText("缺少单词").length).toBe(1);
-    expect(screen.getAllByText("待导入").length).toBe(3);
+    // 5 个非空行，整行作为词条，全部可导入
+    expect(document.querySelectorAll(".import-preview__row").length).toBe(5);
+    expect(document.querySelectorAll(".import-preview__row--error").length).toBe(0);
+    expect(screen.getAllByText("待导入").length).toBe(5);
   });
 
   it("text import calls bulkImportWords and notifies with summary", async () => {
-    vi.mocked(bulkImportWords).mockResolvedValue({ ok: true, created: 3, skipped: 1, duplicates: ["banana"], invalid: [] });
+    vi.mocked(bulkImportWords).mockResolvedValue({ ok: true, created: 4, skipped: 0, duplicates: [], invalid: [] });
     const { props } = renderDrawer();
     fireEvent.click(screen.getByRole("tab", { name: "文本导入" }));
     const textarea = await screen.findByLabelText("粘贴单词列表");
-    fireEvent.change(textarea, { target: { value: "apple\t苹果\nbanana\ncherry\ndate" } });
+    fireEvent.change(textarea, { target: { value: "apple\nbanana\ntake off\nNew York, NY" } });
     fireEvent.click(screen.getByRole("button", { name: "导入 4 个词条" }));
     await waitFor(() => {
       expect(bulkImportWords).toHaveBeenCalledWith(2, [
-        { word: "apple", definition: "苹果" },
+        { word: "apple", definition: "" },
         { word: "banana", definition: "" },
-        { word: "cherry", definition: "" },
-        { word: "date", definition: "" },
+        { word: "take off", definition: "" },
+        { word: "New York, NY", definition: "" },
       ]);
-      expect(props.onUploaded).toHaveBeenCalledWith("文本导入完成：已导入 3 个词条，跳过 1 个（重复/无效）");
+      expect(props.onUploaded).toHaveBeenCalledWith("文本导入完成：已导入 4 个词条");
     });
   });
 
