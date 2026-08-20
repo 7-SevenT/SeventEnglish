@@ -19,12 +19,21 @@ function env() {
         if (/INSERT INTO articles/.test(sql)) {
           const id = next++; rows.set(id, { id, title: params[0], subtitle: params[1], content: params[2], publish_date: params[3], analysis_status: "pending", analysis_json: null, analysis_error: null });
         }
-        if (/UPDATE articles/.test(sql)) {
+        if (/UPDATE articles SET analysis_status/.test(sql)) {
           const row = rows.get(params.at(-1)); if (row) {
             row.analysis_status = params[0];
-            if (params[0] === "completed") row.analysis_json = params[1];
-            else if (params[0] === "failed" || params[0] === "unconfigured") { row.analysis_json = null; row.analysis_error = params[1]; }
-            else row.analysis_error = params[1];
+            if (params.length === 4) { // [status, analysis_json, error, id]
+              row.analysis_json = params[1];
+              row.analysis_error = params[2] ?? null;
+            } else if (params[0] === "failed" || params[0] === "unconfigured") { row.analysis_json = null; row.analysis_error = params[1] ?? null; }
+            else row.analysis_error = params[1] ?? null;
+          }
+        } else if (/UPDATE articles SET title/.test(sql)) {
+          const row = rows.get(params.at(-1)); if (row) {
+            row.title = params[0];
+            row.subtitle = params[1];
+            row.content = params[2];
+            row.publish_date = params[3];
           }
         }
         if (/INSERT INTO settings/.test(sql)) settings.set(String(params[0]), String(params[1]));
@@ -113,7 +122,7 @@ describe("article analysis API", () => {
     expect(response.status).toBe(404);
   });
 
-  it("POST /api/articles enqueues an analysis job and marks processing", async () => {
+  it("POST /api/articles creates the article without enqueuing an analysis job", async () => {
     const sends: AnalyzeJob[] = [];
     const e = {
       ...(await configuredEnv()),
@@ -122,9 +131,22 @@ describe("article analysis API", () => {
     const response = await request("/api/articles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "T", content: "C", publish_date: "2026-01-01" }) }, e);
     expect(response.status).toBe(201);
     const body = await response.json<any>();
-    expect(body.analysis_status).toBe("processing");
-    expect(sends).toHaveLength(1);
-    expect(sends[0]).toEqual({ id: 2, title: "T", content: "C" });
+    expect(body.analysis_status).toBe("pending");
+    expect(sends).toHaveLength(0);
+  });
+
+  it("PATCH /api/articles resets analysis to pending without enqueuing when content changes", async () => {
+    const sends: AnalyzeJob[] = [];
+    const e = {
+      ...(await configuredEnv()),
+      ANALYSIS_QUEUE: { send: async (job: AnalyzeJob) => { sends.push(job); } } as unknown as Queue<AnalyzeJob>,
+    };
+    const response = await request("/api/articles/1", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "New content" }) }, e);
+    expect(response.status).toBe(200);
+    const body = await response.json<any>();
+    expect(body.content).toBe("New content");
+    expect(body.analysis_status).toBe("pending");
+    expect(sends).toHaveLength(0);
   });
 
   it("consumer marks the article failed with the concrete error when analyze service request fails", async () => {

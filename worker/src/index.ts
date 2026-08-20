@@ -115,7 +115,7 @@ app.get("/api/articles/:id", async (c) => {
 // 现改为：analyze 路由只做「设 processing + 入队」，由队列 consumer 执行 AI 调用
 // （consumer wall time 上限 15 分钟，足以容纳长任务）。
 
-async function setAnalysisStatus(env: Env, id: number, status: AnalysisStatus, error: string | null, analysisJson?: string): Promise<void> {
+async function setAnalysisStatus(env: Env, id: number, status: AnalysisStatus, error: string | null, analysisJson?: string | null): Promise<void> {
   // 失败/未配置时同时清空 analysis_json，避免前端轮询到旧数据与 failed 状态共存。
   // （前端虽按 analysis_status === "completed" 判断展示，但数据层应保持干净。）
   if (analysisJson !== undefined) {
@@ -504,8 +504,7 @@ app.post("/api/articles", async (c) => {
   });
   // 兼容极简 D1 mock；真实 D1 始终返回刚插入的文章。
   if (!article) return c.json(article, 201);
-  await setAnalysisStatus(c.env, article.id, "processing", null);
-  await enqueueAnalysis(c, article.id, article.title, article.content);
+  // 创建后不自动入队分析，由用户在管理页手动点击「重分析」触发。
   return c.json(await getArticle(c.env.DB, article.id), 201);
 });
 
@@ -595,10 +594,10 @@ app.patch("/api/articles/:id", async (c) => {
     .bind(title, subtitle, content, publish_date, Number(id))
     .run();
   // 正文变更后旧分析结果与内容错位（段落 index/原文不匹配），
-  // 重置分析状态并重新入队；仅改标题/日期时不触发，避免浪费 AI 额度。
+  // 重置为待分析并清空旧结果，不自动重新入队；
+  // 是否重新分析由用户在管理页/阅读页手动触发。
   if (content !== article.content) {
-    await setAnalysisStatus(c.env, article.id, "processing", null);
-    await enqueueAnalysis(c, article.id, title, content);
+    await setAnalysisStatus(c.env, article.id, "pending", null, null);
   }
   return c.json(await getArticle(c.env.DB, Number(id)));
 });

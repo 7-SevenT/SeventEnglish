@@ -88,13 +88,13 @@ export function ArticleEditorDrawer({ open, mode, initialValue, onClose, onSave 
     <AdminDrawer
       open={open}
       title={mode === "create" ? "新建文章" : "编辑文章"}
-      description="保存后将自动进入 AI 分析队列"
+      description="保存后不会自动分析，如需 AI 分析请在列表中点击「重分析」"
       dirty={dirty && !saving}
       onClose={onClose}
       footer={(
         <>
           <button type="button" className="btn btn--ghost" onClick={onClose} disabled={saving}>取消</button>
-          <button type="button" className="btn btn--primary" onClick={() => void save()} disabled={saving}>{saving ? "保存中…" : "保存并开始 AI 分析"}</button>
+          <button type="button" className="btn btn--primary" onClick={() => void save()} disabled={saving}>{saving ? "保存中…" : "保存"}</button>
         </>
       )}
     >

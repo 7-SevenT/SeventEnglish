@@ -77,7 +77,7 @@ npx wrangler d1 execute <database_name> --file=./db/schema.sql
 
 详见 [设计文档](docs/superpowers/specs/2026-08-09-seventenglish-design.md)。阅读页面与 AI 分析方案见 [阅读分析设计](docs/superpowers/specs/2026-02-14-reading-analysis-design.md)，实施步骤见 [阅读分析实施计划](docs/superpowers/plans/2026-02-14-reading-analysis.md)。段落分析总折叠块设计见 [设计文档](docs/superpowers/specs/2026-08-21-reading-analysis-disclosure-design.md)，实施计划见 [实施计划](docs/superpowers/plans/2026-08-21-reading-analysis-disclosure.md)。数据库分析基础测试位于 `worker/src/db.test.ts`。AI 分析客户端测试位于 `worker/src/articleAnalysis.test.ts`。文章分析接口测试位于 `worker/src/articles-api.test.ts`。段落分析面板测试位于 `src/components/ArticleAnalysisPanel.test.tsx`。文章任意文本标记与评论通过 `ReadingDocument` 的 Tiptap/ProseMirror Mark 保存。文章笔记由 `ArticleNotes` 防抖自动保存。阅读页 UI 参考 ecoSite 的暖米色、深红和衬线卡片风格；值得积累的英语表达（词块）在正文中仅使用黑体加粗，每段原文下面紧跟该段的段落翻译与最值得积累的英语表达折叠解析；跨段落划词后会出现受视口边界约束的荧光/评论工具栏，评论以独立弹层展示，删除标记使用带遮罩的现代确认对话框。划词本身不会保存荧光，只有点击工具栏后才会创建标记。
 
-管理后台全链路重构设计见 [管理工作台设计](docs/superpowers/specs/2026-08-12-admin-workbench-design.md)，包含文章、听写、AI模型三个工作台模块及加密 AI 配置方案。导航模式重构见 [导航栏设计](docs/superpowers/specs/2026-08-12-admin-navigation-design.md)，区分学习模式与管理模式。编辑文章正文后会自动重置 AI 分析状态并重新入队（仅改标题/日期不触发，避免浪费额度）；删除单词书/单元/词条时先删子表再删父表（D1 外键安全）并顺带清理 R2 音频对象。
+管理后台全链路重构设计见 [管理工作台设计](docs/superpowers/specs/2026-08-12-admin-workbench-design.md)，包含文章、听写、AI模型三个工作台模块及加密 AI 配置方案。导航模式重构见 [导航栏设计](docs/superpowers/specs/2026-08-12-admin-navigation-design.md)，区分学习模式与管理模式。文章创建/编辑保存都不会自动触发 AI 分析（编辑正文变更时仅把状态重置为 `pending` 并清空旧分析结果，避免与新正文错位），需要分析时由用户在管理页或阅读页手动点击「重分析」；删除单词书/单元/词条时先删子表再删父表（D1 外键安全）并顺带清理 R2 音频对象。
 
 ### AI 配置
 

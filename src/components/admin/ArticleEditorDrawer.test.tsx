@@ -22,7 +22,7 @@ describe("ArticleEditorDrawer", () => {
   it("shows inline validation and does not save incomplete data", () => {
     const save = vi.fn();
     render(<ArticleEditorDrawer open mode="create" onClose={vi.fn()} onSave={save} />);
-    fireEvent.click(screen.getByRole("button", { name: "保存并开始 AI 分析" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
     expect(screen.getByText("标题不能为空")).toBeTruthy();
     expect(save).not.toHaveBeenCalled();
   });
@@ -33,7 +33,7 @@ describe("ArticleEditorDrawer", () => {
     fireEvent.change(screen.getByLabelText("标题"), { target: { value: "Title" } });
     fireEvent.change(screen.getByLabelText(/副标题/), { target: { value: "Sub" } });
     fireEvent.change(screen.getByLabelText(/正文/), { target: { value: "Body" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存并开始 AI 分析" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ title: "Title", subtitle: "Sub", content: "Body" }));
   });
 
@@ -42,7 +42,7 @@ describe("ArticleEditorDrawer", () => {
     render(<ArticleEditorDrawer open mode="create" onClose={vi.fn()} onSave={save} />);
     fireEvent.change(screen.getByLabelText("标题"), { target: { value: "T2" } });
     fireEvent.change(screen.getByLabelText(/正文/), { target: { value: "B2" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存并开始 AI 分析" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
     expect(save.mock.calls[0][0].subtitle).toBeNull();
   });
 });

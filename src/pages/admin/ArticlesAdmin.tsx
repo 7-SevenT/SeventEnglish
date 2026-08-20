@@ -64,10 +64,10 @@ export function ArticlesAdmin() {
   async function saveArticle(draft: ArticleDraft) {
     if (drawer?.mode === "edit" && drawer.id !== undefined) {
       await updateArticle(drawer.id, draft);
-      setToast({ message: "文章已更新", tone: "success" });
+      setToast({ message: "文章已更新，如需 AI 分析请点击「重分析」", tone: "success" });
     } else {
       await createArticle(draft);
-      setToast({ message: "文章已创建，AI 分析已开始", tone: "success" });
+      setToast({ message: "文章已创建，如需 AI 分析请点击「重分析」", tone: "success" });
     }
     setDrawer(null);
     await load();
